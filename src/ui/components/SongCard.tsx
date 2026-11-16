@@ -1,0 +1,114 @@
+import React from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { Music } from 'lucide-react-native';
+import { Track } from '../../types/music';
+
+interface SongCardProps {
+    track: Track;
+    onPress: (track: Track) => void;
+    highlightQuery?: string
+}
+
+function HighlightedText({ text, query, style }: { text: string; query?: string; style: any }) {
+    if (!query?.trim()) {
+        return <Text style={style} numberOfLines={1}>{text}</Text>;
+    }
+    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+    return (
+        <Text style={style} numberOfLines={1}>
+            {parts.map((part, i) =>
+                part.toLowerCase() === query.trim().toLowerCase() ? (
+                    <Text key={i} style={{ color: '#38BDF8', fontWeight: '700' }}>{part}</Text>
+                ) : (
+                    part
+                )
+            )}
+        </Text>
+    );
+}
+
+export const SongCard: React.FC<SongCardProps> = React.memo(({ track, onPress, highlightQuery }) => {
+    return (
+        <TouchableOpacity style={styles.container} onPress={() => onPress(track)} activeOpacity={0.7} >
+            {/* Carátula o ícono gris por defecto */}
+            < View style={styles.artworkBox} >
+                {
+                    track.artworkUri ? (
+                        <Image source={{ uri: track.artworkUri }} style={styles.artwork} />
+                    ) : (
+                        <Music size={22} color="#9CA3AF" />
+                    )}
+            </View>
+
+            {/* Título, etiqueta de letras (si aplica) y artista */}
+            <View style={styles.infoBox}>
+                <HighlightedText text={track.title} query={highlightQuery} style={styles.title} />
+
+                < View style={styles.subtitleRow} >
+                    {
+                        track.hasLyrics && (
+                            <View style={styles.lyricsBadge}>
+                                <Text style={styles.lyricsText}> Letras </Text>
+                            </View>
+                        )}
+                    <HighlightedText text={track.artist} query={highlightQuery} style={styles.artist} />
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
+});
+
+const styles = StyleSheet.create({
+    container: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+    },
+    artworkBox: {
+        width: 48,
+        height: 48,
+        borderRadius: 8,
+        backgroundColor: '#1F2937',
+        justifyContent: 'center',
+        alignItems: 'center',
+        overflow: 'hidden',
+        marginRight: 12,
+    },
+    artwork: {
+        width: '100%',
+        height: '100%',
+    },
+    infoBox: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    title: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    subtitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 3,
+    },
+    lyricsBadge: {
+        backgroundColor: '#374151',
+        borderRadius: 4,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        marginRight: 6,
+    },
+    lyricsText: {
+        color: '#E5E7EB',
+        fontSize: 10,
+        fontWeight: '600',
+    },
+    artist: {
+        color: 'rgba(255, 255, 255, 0.7)',
+        fontSize: 13,
+        flexShrink: 1,
+    },
+});

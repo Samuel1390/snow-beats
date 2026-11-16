@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Snow Beats",
+    "slug": "snow-beats",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/logo.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "android": {
+      "package": "com.samuelnelo.snowbeats",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WRITE_SETTINGS",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Permite a Snow Beats leer tus archivos multimedia locales.",
+          "savePhotosPermission": "Permite a Snow Beats gestionar archivos locales.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      "expo-sqlite",
+      "expo-audio",
+      "expo-sharing",
+      "expo-video"
+    ]
+  }
+}
