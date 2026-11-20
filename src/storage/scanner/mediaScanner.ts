@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { Track } from '../../types/music';
 import { upsertScannedTracks } from '../database/db';
@@ -18,6 +19,10 @@ function extractFolderPath(uri: string): string {
 export async function scanLocalAudioLibrary(
     onProgress?: (message: string) => void
 ): Promise<number> {
+    if (Platform.OS === 'web') {
+        return 0;
+    }
+
     const collected: Track[] = [];
     let hasNextPage = true;
     let after: string | undefined = undefined;

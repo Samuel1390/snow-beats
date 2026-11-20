@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FlatList, View, Text, TouchableOpacity, Modal, Image, StyleSheet } from 'react-native';
+import { FlatList, View, Text, TouchableOpacity, Modal, Image, StyleSheet, Platform } from 'react-native';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -28,6 +28,7 @@ export const VideosTab: React.FC = () => {
     const [selectedUri, setSelectedUri] = useState<string | null>(null);
 
     useEffect(() => {
+        if (Platform.OS === 'web') return;
         MediaLibrary.requestPermissionsAsync(false, ['video']).then(async (res) => {
             if (!res.granted) return;
             const page = await MediaLibrary.getAssetsAsync({ mediaType: 'video', first: 100 });

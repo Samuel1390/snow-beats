@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-    View, Text, TouchableOpacity, FlatList, TextInput, Modal, StyleSheet, Alert,
+    View, Text, TouchableOpacity, FlatList, TextInput, Modal, StyleSheet, Alert, BackHandler,
 } from 'react-native';
 import { Plus, Heart, Clock, Flame, FileText, ListMusic, ArrowLeft, Trash2 } from 'lucide-react-native';
 import {
@@ -12,7 +12,11 @@ import { useTheme } from '../../theme/ThemeContext';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { SongCard } from '../components/SongCard';
 
-export const PlaylistsTab: React.FC = () => {
+interface PlaylistsTabProps {
+    onOpenPlayer?: () => void;
+}
+
+export const PlaylistsTab: React.FC<PlaylistsTabProps> = ({ onOpenPlayer }) => {
     const { fgColor, mutedColor } = useTheme();
     const { playTrack } = usePlayer();
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -22,6 +26,16 @@ export const PlaylistsTab: React.FC = () => {
 
     const load = async () => setPlaylists(await getPlaylists());
     useEffect(() => { load(); }, []);
+
+    // Maneja botón físico Atrás en Android al ver el detalle de una playlist
+    useEffect(() => {
+        if (!opened) return;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            setOpened(null);
+            return true;
+        });
+        return () => sub.remove();
+    }, [opened]);
 
     const handleCreate = async () => {
         if (!newName.trim()) return;
@@ -70,7 +84,10 @@ export const PlaylistsTab: React.FC = () => {
                     renderItem={({ item }) => (
                         <SongCard
                             track={item}
-                            onPress={(t) => playTrack(t, opened.tracks)}
+                            onPress={(t) => {
+                                playTrack(t, opened.tracks);
+                                onOpenPlayer?.();
+                            }}
                             onLongPress={
                                 opened.id
                                     ? async () => {

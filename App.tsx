@@ -1,5 +1,5 @@
 import React from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, ThemedBackground } from './src/theme/ThemeContext';
 import { SongsScreen } from './src/ui/screens/SongsScreen';
@@ -10,7 +10,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <PlayerProvider>
-          <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+          <StatusBar style="light" />
           <ThemedBackground>
             <SongsScreen />
           </ThemedBackground>

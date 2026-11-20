@@ -114,8 +114,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         const player = createAudioPlayer({ uri: track.uri });
-        player.shouldCorrectPitch = pitch === 1;
-        player.setPlaybackRate(playbackRate);
+        try {
+            player.shouldCorrectPitch = pitch === 1;
+            player.setPlaybackRate(playbackRate);
+        } catch { }
 
         // Si mientras se creaba entró otro clic, descartamos este reproductor
         if (requestId !== playRequestIdRef.current) {
@@ -134,21 +136,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         await markTrackPlayed(track.id);
 
-        // Dentro de playTrack, después de markTrackPlayed(track.id):
+        // Lee etiquetas ID3 en segundo plano si aún no tiene carátula
         if (!track.artworkUri) {
-            readTrackTags(track.uri, track.id).then(async (tags) => {
-                if (!tags) return;
-                const updated: Track = {
-                    ...track,
-                    title: tags.title || track.title,
-                    artist: tags.artist || track.artist,
-                    album: tags.album || track.album,
-                    artworkUri: tags.artworkUri ?? null,
-                    dominantColor: tags.dominantColor ?? null,
-                };
-                await updateTrackMetadata(track.id, updated);
-                setCurrentTrack((curr) => (curr?.id === track.id ? updated : curr));
-            });
+            readTrackTags(track.uri, track.id)
+                .then(async (tags) => {
+                    if (!tags) return;
+                    const updated: Track = {
+                        ...track,
+                        title: tags.title || track.title,
+                        artist: tags.artist || track.artist,
+                        album: tags.album || track.album,
+                        artworkUri: tags.artworkUri ?? null,
+                        dominantColor: tags.dominantColor ?? null,
+                    };
+                    await updateTrackMetadata(track.id, updated);
+                    setCurrentTrack((curr) => (curr?.id === track.id ? updated : curr));
+                })
+                .catch(() => { });
         }
     };
     const togglePlayPause = () => {

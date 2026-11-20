@@ -42,7 +42,8 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       play_count INTEGER DEFAULT 0,
       is_favorite INTEGER DEFAULT 0,
       is_hidden INTEGER DEFAULT 0,
-      is_deleted INTEGER DEFAULT 0
+      is_deleted INTEGER DEFAULT 0,
+      dominant_color TEXT
     );
 
     CREATE TABLE IF NOT EXISTS search_history (
@@ -96,7 +97,33 @@ function mapRowToTrack(row: any): Track {
     isFavorite: Boolean(row.is_favorite),
     isHidden: Boolean(row.is_hidden),
     isDeleted: Boolean(row.is_deleted),
+    dominantColor: row.dominant_color ?? null,
   };
+}
+
+// Actualiza etiquetas ID3, carátula y color dominante de una pista
+export async function updateTrackMetadata(
+  trackId: string,
+  metadata: Partial<Pick<Track, 'title' | 'artist' | 'album' | 'artworkUri' | 'dominantColor'>>
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE tracks
+     SET title = COALESCE(?, title),
+         artist = COALESCE(?, artist),
+         album = COALESCE(?, album),
+         artwork_uri = ?,
+         dominant_color = ?
+     WHERE id = ?`,
+    [
+      metadata.title ?? null,
+      metadata.artist ?? null,
+      metadata.album ?? null,
+      metadata.artworkUri ?? null,
+      metadata.dominantColor ?? null,
+      trackId,
+    ]
+  );
 }
 
 // Inserta o actualiza canciones en lotes de 50
@@ -332,6 +359,15 @@ export async function softDeleteTrack(trackId: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(`UPDATE tracks SET is_deleted = 1 WHERE id = ?`, [trackId]);
 }
+
+// Mueve varias canciones a la papelera interna en una sola operación
+export async function softDeleteTracks(trackIds: string[]): Promise<void> {
+  if (trackIds.length === 0) return;
+  const db = await getDatabase();
+  const placeholders = trackIds.map(() => '?').join(', ');
+  await db.runAsync(`UPDATE tracks SET is_deleted = 1 WHERE id IN (${placeholders})`, trackIds);
+}
+
 // Agrega una canción a una playlist existente
 export async function addTrackToPlaylist(playlistId: string, trackId: string): Promise<void> {
   const db = await getDatabase();
@@ -343,6 +379,70 @@ export async function addTrackToPlaylist(playlistId: string, trackId: string): P
     `INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)`,
     [playlistId, trackId, countRow?.c ?? 0]
   );
+}
+
+// Agrega múltiples canciones a una playlist respetando la posición secuencial
+export async function addTracksToPlaylist(playlistId: string, trackIds: string[]): Promise<number> {
+  if (trackIds.length === 0) return 0;
+  const db = await getDatabase();
+  const maxRow = await db.getFirstAsync<{ maxPos: number | null }>(
+    `SELECT MAX(position) as maxPos FROM playlist_tracks WHERE playlist_id = ?`,
+    [playlistId]
+  );
+  let nextPos = (maxRow?.maxPos ?? -1) + 1;
+  let inserted = 0;
+
+  for (const trackId of trackIds) {
+    const res = await db.runAsync(
+      `INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)`,
+      [playlistId, trackId, nextPos]
+    );
+    if (res.changes > 0) {
+      nextPos += 1;
+      inserted += 1;
+    }
+  }
+  return inserted;
+}
+
+// Obtiene las canciones de una carpeta específica
+export async function getTracksByFolder(
+  folderPath: string,
+  includeHidden = false
+): Promise<Track[]> {
+  const db = await getDatabase();
+  const whereHidden = includeHidden ? '' : 'AND is_hidden = 0';
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM tracks
+     WHERE folder_path = ? AND is_deleted = 0 ${whereHidden}
+     ORDER BY title COLLATE NOCASE ASC`,
+    [folderPath]
+  );
+  return rows.map(mapRowToTrack);
+}
+
+// Obtiene las canciones de un artista específico
+export async function getTracksByArtist(artist: string): Promise<Track[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM tracks
+     WHERE artist = ? AND is_hidden = 0 AND is_deleted = 0
+     ORDER BY album COLLATE NOCASE ASC, title COLLATE NOCASE ASC`,
+    [artist]
+  );
+  return rows.map(mapRowToTrack);
+}
+
+// Obtiene las canciones de un álbum específico
+export async function getTracksByAlbum(album: string): Promise<Track[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM tracks
+     WHERE album = ? AND is_hidden = 0 AND is_deleted = 0
+     ORDER BY title COLLATE NOCASE ASC`,
+    [album]
+  );
+  return rows.map(mapRowToTrack);
 }
 
 // Artistas con las 4 portadas más recientes

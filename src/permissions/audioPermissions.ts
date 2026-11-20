@@ -1,5 +1,5 @@
 import * as MediaLibrary from 'expo-media-library';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 
 export interface PermissionResult {
     granted: boolean;
@@ -8,6 +8,10 @@ export interface PermissionResult {
 
 // Solicita el permiso granular de audio usando expo-media-library
 export async function requestAudioPermission(openSettingsIfBlocked = false): Promise<PermissionResult> {
+    if (Platform.OS === 'web') {
+        return { granted: true, canAskAgain: true };
+    }
+
     const current = await MediaLibrary.getPermissionsAsync(false, ['audio']);
 
     if (current.granted) {

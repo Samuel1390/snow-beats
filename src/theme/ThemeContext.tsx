@@ -101,7 +101,7 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
             >
                 <View
                     style={[
-                        StyleSheet.absoluteFillObject,
+                        StyleSheet.absoluteFill,
                         { backgroundColor: `rgba(0, 0, 0, ${darkOverlayOpacity})` },
                     ]}
                 />

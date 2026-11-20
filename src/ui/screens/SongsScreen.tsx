@@ -9,7 +9,10 @@ import {
     ScrollView,
     Image,
     Alert,
+    BackHandler,
+    Platform,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import { ArtistsTab } from './ArtistTab';
 import { AlbumsTab } from './AlbumsTab';
 import { VideosTab } from './VideosTab';
@@ -19,7 +22,7 @@ import { MainTab, SortOption, Track } from '../../types/music';
 import { requestAudioPermission } from '../../permissions/audioPermissions';
 import { scanLocalAudioLibrary } from '../../storage/scanner/mediaScanner';
 import { AlphabetIndex } from '../components/AlphabetIndex';
-import { getVisibleTracks } from '../../storage/database/db';
+import { getVisibleTracks, softDeleteTracks, updateTrackMetadata } from '../../storage/database/db';
 import { SongCard } from '../components/SongCard';
 import { useTheme } from '../../theme/ThemeContext';
 import { SortModal } from '../components/SortModal';
@@ -30,8 +33,10 @@ import { FoldersTab } from './FoldersTab';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { readTrackTags } from '../../../modules/snow-metadata';
-import { updateTrackMetadata } from '../../storage/database/db';
 import { FullPlayerModal } from './FullPlayerModal';
+import { SelectionActionBar } from '../components/SelectionActionBar';
+import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
+import { pickWebAudioFiles } from '../../storage/scanner/webAudioPicker';
 
 const TABS: { key: MainTab; label: string }[] = [
     { key: 'songs', label: 'Canciones' },
@@ -56,14 +61,33 @@ export const SongsScreen: React.FC = () => {
     const [sortOpen, setSortOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
-    const { playTrack } = usePlayer();
+    const { playTrack, addToQueue } = usePlayer();
     const [playerOpen, setPlayerOpen] = useState(false);
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+
     const toggleSelect = (id: string) =>
         setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
     const listRef = useRef<FlatList<Track>>(null);
+
+    // Sale del modo selección al pulsar el botón físico Atrás en Android
+    useEffect(() => {
+        if (selectedIds.length === 0) return;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            setSelectedIds([]);
+            return true;
+        });
+        return () => sub.remove();
+    }, [selectedIds.length]);
+
+    // Refresca la lista visible desde SQLite sin re-escanear el almacenamiento
+    const refreshTracks = useCallback(async () => {
+        const list = await getVisibleTracks(sortBy);
+        setTracks(list);
+    }, [sortBy]);
+
     // Enriquecimiento progresivo en segundo plano de carátulas y etiquetas ID3
     const enrichMetadataInBackground = useCallback(async (list: Track[]) => {
         const pending = list.filter((t) => !t.artworkUri && t.artist === 'Artista desconocido');
@@ -71,18 +95,22 @@ export const SongsScreen: React.FC = () => {
             const batch = pending.slice(i, i + 5);
             const updates = await Promise.all(
                 batch.map(async (track) => {
-                    const tags = await readTrackTags(track.uri, track.id);
-                    if (!tags) return null;
-                    const updated: Track = {
-                        ...track,
-                        title: tags.title || track.title,
-                        artist: tags.artist || track.artist,
-                        album: tags.album || track.album,
-                        artworkUri: tags.artworkUri ?? null,
-                        dominantColor: tags.dominantColor ?? null,
-                    };
-                    await updateTrackMetadata(track.id, updated);
-                    return updated;
+                    try {
+                        const tags = await readTrackTags(track.uri, track.id);
+                        if (!tags) return null;
+                        const updated: Track = {
+                            ...track,
+                            title: tags.title || track.title,
+                            artist: tags.artist || track.artist,
+                            album: tags.album || track.album,
+                            artworkUri: tags.artworkUri ?? null,
+                            dominantColor: tags.dominantColor ?? null,
+                        };
+                        await updateTrackMetadata(track.id, updated);
+                        return updated;
+                    } catch {
+                        return null;
+                    }
                 })
             );
 
@@ -109,22 +137,67 @@ export const SongsScreen: React.FC = () => {
             setScanStatus('Cargando biblioteca...');
             const list = await getVisibleTracks(currentSort);
             setTracks(list);
-            enrichMetadataInBackground(list);
+            enrichMetadataInBackground(list).catch(() => { });
         } catch (error: any) {
             setErrorMessage(error?.message ?? String(error));
             setPermissionDenied(true);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [enrichMetadataInBackground]);
 
     useEffect(() => {
         loadLibrary(sortBy);
     }, [loadLibrary, sortBy]);
 
-    // Alterna rápidamente entre Más reciente y Título A-Z como prueba en Fase 1
-    const cycleSortDemo = () => {
-        setSortBy((prev) => (prev === 'date_desc' ? 'title_asc' : 'date_desc'));
+    const selectedTracks = tracks.filter((t) => selectedIds.includes(t.id));
+
+    const handleShareSelected = async () => {
+        if (selectedTracks.length === 0) return;
+        if (!(await Sharing.isAvailableAsync())) {
+            Alert.alert('Compartir', 'No disponible en este dispositivo.');
+            return;
+        }
+        // expo-sharing comparte un archivo a la vez en Android
+        if (selectedTracks.length > 1) {
+            Alert.alert(
+                'Compartir',
+                `Android permite compartir 1 archivo por vez. Se compartirá "${selectedTracks[0].title}".`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Compartir',
+                        onPress: async () => {
+                            await Sharing.shareAsync(selectedTracks[0].uri);
+                            setSelectedIds([]);
+                        },
+                    },
+                ]
+            );
+            return;
+        }
+        await Sharing.shareAsync(selectedTracks[0].uri);
+        setSelectedIds([]);
+    };
+
+    const handleDeleteSelected = () => {
+        if (selectedIds.length === 0) return;
+        Alert.alert(
+            'Mover a papelera',
+            `¿Mover ${selectedIds.length} ${selectedIds.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Mover a papelera',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await softDeleteTracks(selectedIds);
+                        setSelectedIds([]);
+                        await refreshTracks();
+                    },
+                },
+            ]
+        );
     };
 
     return (
@@ -133,10 +206,10 @@ export const SongsScreen: React.FC = () => {
             < View style={styles.headerTop} >
                 <View style={styles.brandRow}>
                     <Image source={require('../../../assets/images/logo.png')} style={styles.logo} />
-                    <Text style={styles.brandTitle}> Snow Beats </Text>
+                    <Text style={[styles.brandTitle, { color: fgColor }]}>Snow Beats</Text>
                 </View>
 
-                < View style={styles.headerActions} >
+                <View style={styles.headerActions}>
                     <TouchableOpacity style={styles.iconButton} onPress={() => setSearchOpen(true)}>
                         <Search size={21} color={fgColor} />
                     </TouchableOpacity>
@@ -153,23 +226,32 @@ export const SongsScreen: React.FC = () => {
 
             {/* Segunda fila del Header: 6 pestañas */}
             <View style={styles.tabsWrapper}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent} >
-                    {
-                        TABS.map((tab) => {
-                            const isActive = activeTab === tab.key;
-                            return (
-                                <TouchableOpacity
-                                    key={tab.key}
-                                    style={[styles.tabItem, isActive && styles.tabItemActive]}
-                                    onPress={() => setActiveTab(tab.key)
-                                    }
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
+                    {TABS.map((tab) => {
+                        const isActive = activeTab === tab.key;
+                        return (
+                            <TouchableOpacity
+                                key={tab.key}
+                                style={[
+                                    styles.tabItem,
+                                    isActive && { borderBottomColor: fgColor },
+                                ]}
+                                onPress={() => {
+                                    setSelectedIds([]);
+                                    setActiveTab(tab.key);
+                                }}
+                            >
+                                <Text
+                                    style={[
+                                        styles.tabText,
+                                        { color: isActive ? fgColor : mutedColor },
+                                    ]}
                                 >
-                                    <Text style={[styles.tabText, isActive && styles.tabTextActive]} >
-                                        {tab.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
+                                    {tab.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </ScrollView>
             </View>
 
@@ -189,35 +271,84 @@ export const SongsScreen: React.FC = () => {
                     </TouchableOpacity>
                 </View>
             ) : activeTab === 'playlists' ? (
-                <PlaylistsTab />
+                <PlaylistsTab onOpenPlayer={() => setPlayerOpen(true)} />
             ) : activeTab === 'folders' ? (
-                <FoldersTab />
+                <FoldersTab onOpenPlayer={() => setPlayerOpen(true)} onLibraryChanged={refreshTracks} />
             ) : activeTab === 'artists' ? (
-                <ArtistsTab />
+                <ArtistsTab onOpenPlayer={() => setPlayerOpen(true)} onLibraryChanged={refreshTracks} />
             ) : activeTab === 'albums' ? (
-                <AlbumsTab />
+                <AlbumsTab onOpenPlayer={() => setPlayerOpen(true)} onLibraryChanged={refreshTracks} />
             ) : activeTab === 'videos' ? (
                 <VideosTab />
             ) : (
                 <View style={{ flex: 1 }}>
+                    <SelectionActionBar
+                        selectedCount={selectedIds.length}
+                        totalCount={tracks.length}
+                        onClear={() => setSelectedIds([])}
+                        onToggleSelectAll={() =>
+                            setSelectedIds(
+                                selectedIds.length >= tracks.length ? [] : tracks.map((t) => t.id)
+                            )
+                        }
+                        onAddToQueue={() => {
+                            addToQueue(selectedTracks);
+                            Alert.alert(
+                                'Cola actualizada',
+                                `Se agregaron ${selectedTracks.length} canciones a la cola.`
+                            );
+                            setSelectedIds([]);
+                        }}
+                        onAddToPlaylist={() => setPlaylistModalOpen(true)}
+                        onShare={handleShareSelected}
+                        onDelete={handleDeleteSelected}
+                    />
+
                     <FlatList
                         ref={listRef}
                         data={tracks}
                         keyExtractor={(item) => item.id}
+                        extraData={selectedIds}
                         initialNumToRender={15}
                         maxToRenderPerBatch={10}
                         windowSize={5}
                         removeClippedSubviews
                         renderItem={({ item }) => (
-                            <SongCard track={item} onPress={(selected) => {
-                                if (selectedIds.length > 0) {
-                                    toggleSelect(selected.id);
-                                } else {
-                                    playTrack(selected, tracks);
-                                    setPlayerOpen(true);
-                                }
-                            }} />
+                            <SongCard
+                                track={item}
+                                selected={selectedIds.includes(item.id)}
+                                onPress={(selected) => {
+                                    if (selectedIds.length > 0) {
+                                        toggleSelect(selected.id);
+                                    } else {
+                                        playTrack(selected, tracks);
+                                        setPlayerOpen(true);
+                                    }
+                                }}
+                                onLongPress={(selected) => toggleSelect(selected.id)}
+                                onArtworkPress={(selected) => toggleSelect(selected.id)}
+                            />
                         )}
+                        ListEmptyComponent={
+                            <View style={styles.centered}>
+                                <Text style={[styles.statusText, { color: mutedColor }]}>
+                                    {Platform.OS === 'web'
+                                        ? 'Vista previa web: carga archivos de audio locales para probar la app aquí.'
+                                        : 'No se encontraron canciones en el dispositivo.'}
+                                </Text>
+                                {Platform.OS === 'web' && (
+                                    <TouchableOpacity
+                                        style={styles.retryButton}
+                                        onPress={async () => {
+                                            const added = await pickWebAudioFiles();
+                                            if (added > 0) await refreshTracks();
+                                        }}
+                                    >
+                                        <Text style={styles.retryText}>Cargar audios locales</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        }
                     />
                     <AlphabetIndex
                         visible={['title_asc', 'title_desc', 'artist_asc', 'artist_desc'].includes(sortBy)}
@@ -233,6 +364,12 @@ export const SongsScreen: React.FC = () => {
                 </View>
             )}
 
+            <AddToPlaylistModal
+                visible={playlistModalOpen}
+                trackIds={selectedIds}
+                onClose={() => setPlaylistModalOpen(false)}
+                onAdded={() => setSelectedIds([])}
+            />
             <SortModal
                 visible={sortOpen}
                 currentSort={sortBy}
@@ -242,11 +379,26 @@ export const SongsScreen: React.FC = () => {
             <SearchModal
                 visible={searchOpen}
                 onClose={() => setSearchOpen(false)}
-                onSelectTrack={(selected) => playTrack(selected, tracks)}
+                onSelectTrack={(selected) => {
+                    playTrack(selected, tracks);
+                    setPlayerOpen(true);
+                }}
             />
-            <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
+            <SettingsModal
+                visible={settingsOpen}
+                onClose={() => {
+                    setSettingsOpen(false);
+                    refreshTracks();
+                }}
+            />
             <MiniPlayer onExpand={() => setPlayerOpen(true)} />
-            <FullPlayerModal visible={playerOpen} onClose={() => setPlayerOpen(false)} />
+            <FullPlayerModal
+                visible={playerOpen}
+                onClose={() => {
+                    setPlayerOpen(false);
+                    refreshTracks();
+                }}
+            />
         </SafeAreaView>
     );
 };

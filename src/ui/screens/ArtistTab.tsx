@@ -1,16 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { FlatList, View, Text, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { FlatList, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { CollageArtwork } from '../components/CollageArtWork';
-import { getArtistsSummary } from '../../storage/database/db';
+import { getArtistsSummary, getTracksByArtist } from '../../storage/database/db';
+import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { TrackGroupDetail } from '../components/TrackGroupDetail';
 
-export const ArtistsTab: React.FC = () => {
+interface ArtistsTabProps {
+    onOpenPlayer?: () => void;
+    onLibraryChanged?: () => Promise<void> | void;
+}
+
+export const ArtistsTab: React.FC<ArtistsTabProps> = ({ onOpenPlayer, onLibraryChanged }) => {
     const { fgColor, mutedColor } = useTheme();
     const [artists, setArtists] = useState<
         { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
     >([]);
+    const [opened, setOpened] = useState<{ name: string; tracks: Track[] } | null>(null);
 
-    useEffect(() => { getArtistsSummary().then(setArtists); }, []);
+    const loadArtists = useCallback(async () => {
+        setArtists(await getArtistsSummary());
+    }, []);
+
+    useEffect(() => {
+        loadArtists();
+    }, [loadArtists]);
+
+    const openArtist = async (name: string) => {
+        const tracks = await getTracksByArtist(name);
+        setOpened({ name, tracks });
+    };
+
+    // Vista interna con las canciones del artista seleccionado
+    if (opened) {
+        return (
+            <TrackGroupDetail
+                title={opened.name}
+                tracks={opened.tracks}
+                onBack={() => setOpened(null)}
+                onOpenPlayer={onOpenPlayer}
+                onTracksChanged={async () => {
+                    const refreshed = await getTracksByArtist(opened.name);
+                    setOpened((prev) => (prev ? { ...prev, tracks: refreshed } : null));
+                    await loadArtists();
+                    await onLibraryChanged?.();
+                }}
+            />
+        );
+    }
 
     return (
         <FlatList
@@ -18,13 +56,22 @@ export const ArtistsTab: React.FC = () => {
             keyExtractor={(item) => item.name}
             contentContainerStyle={{ padding: 16 }}
             renderItem={({ item }) => (
-                <View style={styles.row}>
+                <TouchableOpacity
+                    style={styles.row}
+                    activeOpacity={0.7}
+                    onPress={() => openArtist(item.name)}
+                >
                     <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
-                    <View style={{ marginLeft: 12 }}>
-                        <Text style={[styles.name, { color: fgColor }]}>{item.name}</Text>
-                        <Text style={{ color: mutedColor, fontSize: 12 }}>{item.trackCount} canciones</Text>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
+                            {item.name}
+                        </Text>
+                        <Text style={{ color: mutedColor, fontSize: 12 }}>
+                            {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
+                        </Text>
                     </View>
-                </View>
+                    <ChevronRight size={18} color={mutedColor} />
+                </TouchableOpacity>
             )}
         />
     );

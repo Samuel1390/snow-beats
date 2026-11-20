@@ -1,17 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, Switch, StyleSheet } from 'react-native';
-import { Folder } from 'lucide-react-native';
-import { FolderItem, getFolders } from '../../storage/database/db';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, FlatList, Switch, TouchableOpacity, StyleSheet } from 'react-native';
+import { ChevronRight, Folder } from 'lucide-react-native';
+import { FolderItem, getFolders, getTracksByFolder } from '../../storage/database/db';
+import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { TrackGroupDetail } from '../components/TrackGroupDetail';
 
-export const FoldersTab: React.FC = () => {
+interface FoldersTabProps {
+    onOpenPlayer?: () => void;
+    onLibraryChanged?: () => Promise<void> | void;
+}
+
+export const FoldersTab: React.FC<FoldersTabProps> = ({ onOpenPlayer, onLibraryChanged }) => {
     const { fgColor, mutedColor } = useTheme();
     const [showHidden, setShowHidden] = useState(false);
     const [folders, setFolders] = useState<FolderItem[]>([]);
+    const [opened, setOpened] = useState<{ folder: FolderItem; tracks: Track[] } | null>(null);
+
+    const loadFolders = useCallback(async () => {
+        const list = await getFolders(showHidden);
+        setFolders(list);
+    }, [showHidden]);
 
     useEffect(() => {
-        getFolders(showHidden).then(setFolders);
-    }, [showHidden]);
+        loadFolders();
+    }, [loadFolders]);
+
+    const openFolder = async (folder: FolderItem) => {
+        const tracks = await getTracksByFolder(folder.path, showHidden);
+        setOpened({ folder, tracks });
+    };
+
+    // Vista interna con las canciones de la carpeta seleccionada
+    if (opened) {
+        return (
+            <TrackGroupDetail
+                title={opened.folder.name}
+                subtitle={opened.folder.path}
+                tracks={opened.tracks}
+                onBack={() => setOpened(null)}
+                onOpenPlayer={onOpenPlayer}
+                onTracksChanged={async () => {
+                    const refreshed = await getTracksByFolder(opened.folder.path, showHidden);
+                    setOpened((prev) => (prev ? { ...prev, tracks: refreshed } : null));
+                    await loadFolders();
+                    await onLibraryChanged?.();
+                }}
+            />
+        );
+    }
 
     return (
         <View style={styles.container}>
@@ -27,17 +64,22 @@ export const FoldersTab: React.FC = () => {
                 data={folders}
                 keyExtractor={(item) => item.path}
                 renderItem={({ item }) => (
-                    <View style={styles.row}>
+                    <TouchableOpacity
+                        style={styles.row}
+                        activeOpacity={0.7}
+                        onPress={() => openFolder(item)}
+                    >
                         <Folder size={22} color={fgColor} />
                         <View style={{ marginLeft: 12, flex: 1 }}>
                             <Text style={[styles.folderName, { color: fgColor }]} numberOfLines={1}>
                                 {item.name}
                             </Text>
                             <Text style={{ color: mutedColor, fontSize: 12 }}>
-                                {item.trackCount} canciones
+                                {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
                             </Text>
                         </View>
-                    </View>
+                        <ChevronRight size={18} color={mutedColor} />
+                    </TouchableOpacity>
                 )}
             />
         </View>

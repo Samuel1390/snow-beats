@@ -35,6 +35,7 @@ import {
 } from 'lucide-react-native';
 import { SPEED_STEPS, usePlayer } from '../../audio-engine/PlayerContext';
 import { getDynamicPlayerPalette } from '../../theme/colorContrast';
+import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 
 function formatTime(sec: number): string {
     const m = Math.floor(sec / 60);
@@ -69,6 +70,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
     } = usePlayer();
 
     const [menuOpen, setMenuOpen] = useState(false);
+    const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
     const [speedOpen, setSpeedOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [askDeleteAgain, setAskDeleteAgain] = useState(true);
@@ -200,7 +202,13 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
                 <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
                     <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setMenuOpen(false)}>
                         <View style={styles.sheet}>
-                            <TouchableOpacity style={styles.sheetItem} onPress={() => { setMenuOpen(false); Alert.alert('Playlists', 'Selector de playlist en progreso.'); }}>
+                            <TouchableOpacity
+                                style={styles.sheetItem}
+                                onPress={() => {
+                                    setMenuOpen(false);
+                                    setPlaylistModalOpen(true);
+                                }}
+                            >
                                 <Plus size={20} color="#FFFFFF" />
                                 <Text style={styles.sheetText}>Agregar a playlist</Text>
                             </TouchableOpacity>
@@ -299,6 +307,12 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
                         </View>
                     </View>
                 </Modal>
+                {/* Selector de playlist para la pista actual */}
+                <AddToPlaylistModal
+                    visible={playlistModalOpen}
+                    trackIds={[currentTrack.id]}
+                    onClose={() => setPlaylistModalOpen(false)}
+                />
             </View>
         </Modal>
     );
