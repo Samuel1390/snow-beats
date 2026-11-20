@@ -1,9 +1,10 @@
-import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Music, Play, Pause, Repeat, Repeat1, Shuffle } from 'lucide-react-native';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
 import { getDynamicPlayerPalette } from '../../theme/colorContrast';
 import Slider from '@react-native-community/slider';
+
 interface MiniPlayerProps {
     onExpand: () => void;
 }
@@ -12,17 +13,54 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
     const { currentTrack, isPlaying, repeatMode, togglePlayPause, cycleRepeatMode, seekTo } =
         usePlayer();
     const { position, duration } = usePlayerProgress();
+    const entranceAnim = useRef(new Animated.Value(currentTrack ? 1 : 0)).current;
+    const playScale = useRef(new Animated.Value(1)).current;
+    const hasShownRef = useRef(Boolean(currentTrack));
+
+    // Animación de entrada suave al aparecer el mini reproductor por primera vez
+    useEffect(() => {
+        if (currentTrack && !hasShownRef.current) {
+            hasShownRef.current = true;
+            entranceAnim.setValue(0);
+            Animated.spring(entranceAnim, {
+                toValue: 1,
+                damping: 20,
+                stiffness: 220,
+                useNativeDriver: true,
+            }).start();
+        }
+    }, [currentTrack, entranceAnim]);
 
     if (!currentTrack) return null;
 
     const palette = getDynamicPlayerPalette(currentTrack.dominantColor);
-    const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
-
     const RepeatIcon =
         repeatMode === 'repeat_one' ? Repeat1 : repeatMode === 'shuffle' ? Shuffle : Repeat;
 
+    const handlePlayPress = () => {
+        Animated.sequence([
+            Animated.timing(playScale, { toValue: 0.82, duration: 80, useNativeDriver: true }),
+            Animated.spring(playScale, { toValue: 1, damping: 14, stiffness: 280, useNativeDriver: true }),
+        ]).start();
+        togglePlayPause();
+    };
+
+    const translateY = entranceAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [64, 0],
+    });
+
     return (
-        <View style={[styles.wrapper, { backgroundColor: palette.background }]}>
+        <Animated.View
+            style={[
+                styles.wrapper,
+                {
+                    backgroundColor: palette.background,
+                    opacity: entranceAnim,
+                    transform: [{ translateY }],
+                },
+            ]}
+        >
             {/* Barra de progreso interactiva en el borde superior */}
             <Slider
                 style={styles.topSlider}
@@ -53,21 +91,23 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
                     </Text>
                 </View>
 
-                <TouchableOpacity style={styles.btn} onPress={togglePlayPause}>
-                    {isPlaying ? (
-                        <Pause size={22} color={palette.foreground} />
-                    ) : (
-                        <Play size={22} color={palette.foreground} />
-                    )}
-                </TouchableOpacity>
+                <Animated.View style={{ transform: [{ scale: playScale }] }}>
+                    <TouchableOpacity style={styles.btn} onPress={handlePlayPress}>
+                        {isPlaying ? (
+                            <Pause size={22} color={palette.foreground} />
+                        ) : (
+                            <Play size={22} color={palette.foreground} />
+                        )}
+                    </TouchableOpacity>
+                </Animated.View>
 
                 <TouchableOpacity style={styles.btn} onPress={cycleRepeatMode}>
                     <RepeatIcon size={20} color={palette.foreground} />
                 </TouchableOpacity>
             </TouchableOpacity>
-        </View>
+        </Animated.View>
     );
-}
+};
 
 const styles = StyleSheet.create({
     wrapper: {
@@ -95,7 +135,5 @@ const styles = StyleSheet.create({
     title: { fontSize: 14, fontWeight: '700' },
     artist: { fontSize: 12, marginTop: 2 },
     btn: { padding: 8, marginLeft: 4 },
-    progressTrack: { height: 2.5, backgroundColor: 'rgba(255,255,255,0.15)' },
-    progressFill: { height: '100%' },
     topSlider: { width: '100%', height: 18, marginTop: -8, marginBottom: -6 },
 });

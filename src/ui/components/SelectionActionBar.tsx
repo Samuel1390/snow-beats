@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { CheckSquare, ListMusic, ListPlus, Share2, Trash2, X } from 'lucide-react-native';
 
 interface SelectionActionBarProps {
@@ -13,7 +13,7 @@ interface SelectionActionBarProps {
     onDelete: () => void;
 }
 
-// Barra contextual para acciones por lote sobre las canciones seleccionadas
+// Barra contextual con slide-in al activar selección y slide-out al cerrar
 export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
     selectedCount,
     totalCount,
@@ -24,56 +24,110 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
     onShare,
     onDelete,
 }) => {
-    if (selectedCount === 0) return null;
+    const visible = selectedCount > 0;
+    const [mounted, setMounted] = useState(visible);
+    const lastCountRef = useRef(selectedCount);
+    const anim = useRef(new Animated.Value(visible ? 1 : 0)).current;
 
-    const allSelected = totalCount > 0 && selectedCount >= totalCount;
+    if (selectedCount > 0) {
+        lastCountRef.current = selectedCount;
+    }
+
+    useEffect(() => {
+        if (visible) {
+            setMounted(true);
+            Animated.spring(anim, {
+                toValue: 1,
+                damping: 22,
+                stiffness: 240,
+                mass: 0.85,
+                useNativeDriver: false,
+            }).start();
+        } else if (mounted) {
+            Animated.timing(anim, {
+                toValue: 0,
+                duration: 180,
+                easing: Easing.in(Easing.cubic),
+                useNativeDriver: false,
+            }).start(({ finished }) => {
+                if (finished) setMounted(false);
+            });
+        }
+    }, [visible, mounted, anim]);
+
+    if (!mounted) return null;
+
+    const displayCount = visible ? selectedCount : lastCountRef.current;
+    const allSelected = totalCount > 0 && displayCount >= totalCount;
+
+    const maxHeight = anim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 128],
+    });
+    const translateY = anim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-28, 0],
+    });
 
     return (
-        <View style={styles.wrapper}>
-            <View style={styles.topRow}>
-                <View style={styles.leftRow}>
-                    <TouchableOpacity onPress={onClear} style={styles.iconBtn}>
-                        <X size={20} color="#FFFFFF" />
+        <Animated.View
+            style={[
+                styles.clipWrapper,
+                {
+                    maxHeight,
+                    opacity: anim,
+                },
+            ]}
+        >
+            <Animated.View style={[styles.wrapper, { transform: [{ translateY }] }]}>
+                <View style={styles.topRow}>
+                    <View style={styles.leftRow}>
+                        <TouchableOpacity onPress={onClear} style={styles.iconBtn}>
+                            <X size={20} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <Text style={styles.countText}>
+                            {displayCount} {displayCount === 1 ? 'seleccionada' : 'seleccionadas'}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity onPress={onToggleSelectAll} style={styles.selectAllBtn}>
+                        <CheckSquare size={16} color="#38BDF8" />
+                        <Text style={styles.selectAllText}>
+                            {allSelected ? 'Quitar todo' : 'Todas'}
+                        </Text>
                     </TouchableOpacity>
-                    <Text style={styles.countText}>
-                        {selectedCount} {selectedCount === 1 ? 'seleccionada' : 'seleccionadas'}
-                    </Text>
                 </View>
 
-                <TouchableOpacity onPress={onToggleSelectAll} style={styles.selectAllBtn}>
-                    <CheckSquare size={16} color="#38BDF8" />
-                    <Text style={styles.selectAllText}>
-                        {allSelected ? 'Quitar todo' : 'Todas'}
-                    </Text>
-                </TouchableOpacity>
-            </View>
+                <View style={styles.actionsRow}>
+                    <TouchableOpacity style={styles.actionBtn} onPress={onAddToQueue}>
+                        <ListPlus size={19} color="#FFFFFF" />
+                        <Text style={styles.actionLabel}>A la cola</Text>
+                    </TouchableOpacity>
 
-            <View style={styles.actionsRow}>
-                <TouchableOpacity style={styles.actionBtn} onPress={onAddToQueue}>
-                    <ListPlus size={19} color="#FFFFFF" />
-                    <Text style={styles.actionLabel}>A la cola</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.actionBtn} onPress={onAddToPlaylist}>
+                        <ListMusic size={19} color="#FFFFFF" />
+                        <Text style={styles.actionLabel}>Playlist</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.actionBtn} onPress={onAddToPlaylist}>
-                    <ListMusic size={19} color="#FFFFFF" />
-                    <Text style={styles.actionLabel}>Playlist</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.actionBtn} onPress={onShare}>
+                        <Share2 size={19} color="#FFFFFF" />
+                        <Text style={styles.actionLabel}>Compartir</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.actionBtn} onPress={onShare}>
-                    <Share2 size={19} color="#FFFFFF" />
-                    <Text style={styles.actionLabel}>Compartir</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionBtn} onPress={onDelete}>
-                    <Trash2 size={19} color="#F87171" />
-                    <Text style={[styles.actionLabel, { color: '#F87171' }]}>Eliminar</Text>
-                </TouchableOpacity>
-            </View>
-        </View>
+                    <TouchableOpacity style={styles.actionBtn} onPress={onDelete}>
+                        <Trash2 size={19} color="#F87171" />
+                        <Text style={[styles.actionLabel, { color: '#F87171' }]}>Eliminar</Text>
+                    </TouchableOpacity>
+                </View>
+            </Animated.View>
+        </Animated.View>
     );
 };
 
 const styles = StyleSheet.create({
+    clipWrapper: {
+        overflow: 'hidden',
+    },
     wrapper: {
         backgroundColor: '#111827',
         borderBottomWidth: 1,

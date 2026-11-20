@@ -5,6 +5,7 @@ export interface Playlist {
   name: string;
   createdAt: number;
   trackCount: number;
+  recentArtworks: (string | null)[];
 }
 
 export interface FolderItem {
@@ -186,14 +187,21 @@ export async function addSearchHistory(query: string): Promise<void> {
 
 export async function getPlaylists(): Promise<Playlist[]> {
   const state = loadState();
+  const trackMap = new Map(state.tracks.filter((t) => !t.isDeleted).map((t) => [t.id, t]));
   return [...state.playlists]
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      createdAt: p.createdAt,
-      trackCount: state.playlistTracks.filter((pt) => pt.playlistId === p.id).length,
-    }));
+    .map((p) => {
+      const items = state.playlistTracks
+        .filter((pt) => pt.playlistId === p.id && trackMap.has(pt.trackId))
+        .sort((a, b) => b.position - a.position);
+      return {
+        id: p.id,
+        name: p.name,
+        createdAt: p.createdAt,
+        trackCount: items.length,
+        recentArtworks: items.slice(0, 4).map((pt) => trackMap.get(pt.trackId)?.artworkUri ?? null),
+      };
+    });
 }
 
 export async function createPlaylist(name: string): Promise<Playlist> {
@@ -203,6 +211,7 @@ export async function createPlaylist(name: string): Promise<Playlist> {
     name: name.trim(),
     createdAt: Date.now(),
     trackCount: 0,
+    recentArtworks: [],
   };
   state.playlists.push({ id: created.id, name: created.name, createdAt: created.createdAt });
   saveState(state);
@@ -366,7 +375,6 @@ export async function getArtistsSummary(): Promise<
     groups.set(t.artist, arr);
   }
   return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, list]) => ({
       name,
       trackCount: list.length,
@@ -374,7 +382,8 @@ export async function getArtistsSummary(): Promise<
         .sort((a, b) => b.creationTime - a.creationTime)
         .slice(0, 4)
         .map((t) => t.artworkUri),
-    }));
+    }))
+    .sort((a, b) => b.trackCount - a.trackCount || a.name.localeCompare(b.name));
 }
 
 export async function getAlbumsSummary(): Promise<
@@ -388,7 +397,6 @@ export async function getAlbumsSummary(): Promise<
     groups.set(t.album, arr);
   }
   return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, list]) => ({
       name,
       trackCount: list.length,
@@ -396,7 +404,8 @@ export async function getAlbumsSummary(): Promise<
         .sort((a, b) => b.creationTime - a.creationTime)
         .slice(0, 4)
         .map((t) => t.artworkUri),
-    }));
+    }))
+    .sort((a, b) => b.trackCount - a.trackCount || a.name.localeCompare(b.name));
 }
 
 export async function getPlaylistTracks(playlistId: string): Promise<Track[]> {

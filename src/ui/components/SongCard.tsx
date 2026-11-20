@@ -1,5 +1,13 @@
-import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+    Animated,
+    Easing,
+    Image,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { Check, Music } from 'lucide-react-native';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
@@ -35,64 +43,120 @@ function HighlightedText({ text, query, style }: { text: string; query?: string;
 export const SongCard: React.FC<SongCardProps> = React.memo(
     ({ track, onPress, highlightQuery, selected = false, onLongPress, onArtworkPress }) => {
         const { fgColor, mutedColor } = useTheme();
+        const selectAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
+        const pressScale = useRef(new Animated.Value(1)).current;
+
+        // Fade-in suave al azul al seleccionar y fade-out al deseleccionar
+        useEffect(() => {
+            Animated.timing(selectAnim, {
+                toValue: selected ? 1 : 0,
+                duration: selected ? 200 : 180,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            }).start();
+        }, [selected, selectAnim]);
+
+        const bgColor = selectAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['rgba(56, 189, 248, 0)', 'rgba(56, 189, 248, 0.20)'],
+        });
+
+        const borderColor = selectAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['rgba(56, 189, 248, 0)', '#38BDF8'],
+        });
+
+        const checkScale = selectAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.55, 1],
+        });
+
+        const handlePressIn = () => {
+            Animated.timing(pressScale, {
+                toValue: 0.985,
+                duration: 90,
+                useNativeDriver: true,
+            }).start();
+        };
+
+        const handlePressOut = () => {
+            Animated.spring(pressScale, {
+                toValue: 1,
+                damping: 18,
+                stiffness: 260,
+                useNativeDriver: true,
+            }).start();
+        };
 
         const artworkContent = (
-            <View style={[styles.artworkBox, selected && styles.artworkBoxSelected]}>
+            <Animated.View style={[styles.artworkBox, { borderColor, borderWidth: selected ? 2 : 0 }]}>
                 {track.artworkUri ? (
                     <Image source={{ uri: track.artworkUri }} style={styles.artwork} />
                 ) : (
                     <Music size={22} color="#9CA3AF" />
                 )}
-                {selected && (
-                    <View style={styles.checkOverlay}>
+                <Animated.View
+                    pointerEvents="none"
+                    style={[
+                        styles.checkOverlay,
+                        { opacity: selectAnim },
+                    ]}
+                >
+                    <Animated.View style={{ transform: [{ scale: checkScale }] }}>
                         <Check size={20} color="#FFFFFF" strokeWidth={3} />
-                    </View>
-                )}
-            </View>
+                    </Animated.View>
+                </Animated.View>
+            </Animated.View>
         );
 
         return (
-            <TouchableOpacity
-                style={[styles.container, selected && styles.containerSelected]}
-                onPress={() => onPress(track)}
-                activeOpacity={0.7}
-                onLongPress={() => onLongPress?.(track)}
-            >
-                {/* Carátula seleccionable al tocar o ícono por defecto */}
-                {onArtworkPress ? (
+            <Animated.View style={{ backgroundColor: bgColor }}>
+                <Animated.View style={{ transform: [{ scale: pressScale }] }}>
                     <TouchableOpacity
-                        onPress={() => onArtworkPress(track)}
-                        activeOpacity={0.8}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        style={styles.container}
+                        onPress={() => onPress(track)}
+                        onPressIn={handlePressIn}
+                        onPressOut={handlePressOut}
+                        activeOpacity={0.85}
+                        onLongPress={() => onLongPress?.(track)}
                     >
-                        {artworkContent}
-                    </TouchableOpacity>
-                ) : (
-                    artworkContent
-                )}
-
-                {/* Título, etiqueta de letras (si aplica) y artista */}
-                <View style={styles.infoBox}>
-                    <HighlightedText
-                        text={track.title}
-                        query={highlightQuery}
-                        style={[styles.title, { color: fgColor }]}
-                    />
-
-                    <View style={styles.subtitleRow}>
-                        {track.hasLyrics && (
-                            <View style={styles.lyricsBadge}>
-                                <Text style={styles.lyricsText}>Letras</Text>
-                            </View>
+                        {/* Carátula seleccionable al tocar o ícono por defecto */}
+                        {onArtworkPress ? (
+                            <TouchableOpacity
+                                onPress={() => onArtworkPress(track)}
+                                activeOpacity={0.8}
+                                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            >
+                                {artworkContent}
+                            </TouchableOpacity>
+                        ) : (
+                            artworkContent
                         )}
-                        <HighlightedText
-                            text={track.artist}
-                            query={highlightQuery}
-                            style={[styles.artist, { color: mutedColor }]}
-                        />
-                    </View>
-                </View>
-            </TouchableOpacity>
+
+                        {/* Título, etiqueta de letras (si aplica) y artista */}
+                        <View style={styles.infoBox}>
+                            <HighlightedText
+                                text={track.title}
+                                query={highlightQuery}
+                                style={[styles.title, { color: fgColor }]}
+                            />
+
+                            <View style={styles.subtitleRow}>
+                                {track.hasLyrics && (
+                                    <View style={styles.lyricsBadge}>
+                                        <Text style={styles.lyricsText}>Letras</Text>
+                                    </View>
+                                )}
+                                <HighlightedText
+                                    text={track.artist}
+                                    query={highlightQuery}
+                                    style={[styles.artist, { color: mutedColor }]}
+                                />
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+                </Animated.View>
+            </Animated.View>
         );
     }
 );
@@ -104,9 +168,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 10,
     },
-    containerSelected: {
-        backgroundColor: 'rgba(56, 189, 248, 0.16)',
-    },
     artworkBox: {
         width: 48,
         height: 48,
@@ -116,10 +177,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         overflow: 'hidden',
         marginRight: 12,
-    },
-    artworkBoxSelected: {
-        borderWidth: 2,
-        borderColor: '#38BDF8',
     },
     checkOverlay: {
         position: 'absolute',

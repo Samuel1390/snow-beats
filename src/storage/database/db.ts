@@ -8,6 +8,7 @@ export interface Playlist {
   name: string;
   createdAt: number;
   trackCount: number;
+  recentArtworks: (string | null)[];
 }
 
 export interface FolderItem {
@@ -69,6 +70,9 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       key TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_tracks_visible ON tracks(is_deleted, is_hidden, creation_time DESC);
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pid ON playlist_tracks(playlist_id, position DESC);
   `);
 
   // Migraciones seguras para columnas nuevas si la BD ya existía de Fase 1
@@ -229,21 +233,41 @@ export async function addSearchHistory(query: string): Promise<void> {
   );
 }
 
-// Playlists manuales y automáticas
+// Playlists manuales con sus 4 portadas más recientes en 2 consultas sin N+1
 export async function getPlaylists(): Promise<Playlist[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<any>(
-    `SELECT p.id, p.name, p.created_at, COUNT(pt.track_id) as track_count
+    `SELECT p.id, p.name, p.created_at, COUNT(t.id) as track_count
      FROM playlists p
      LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
+     LEFT JOIN tracks t ON t.id = pt.track_id AND t.is_deleted = 0
      GROUP BY p.id
      ORDER BY p.created_at DESC`
   );
+
+  // Obtiene las carátulas de todas las playlists en una sola consulta ordenada por posición reciente
+  const artRows = await db.getAllAsync<{ playlist_id: string; artwork_uri: string | null }>(
+    `SELECT pt.playlist_id, t.artwork_uri
+     FROM playlist_tracks pt
+     INNER JOIN tracks t ON t.id = pt.track_id AND t.is_deleted = 0
+     ORDER BY pt.position DESC`
+  );
+
+  const artMap = new Map<string, (string | null)[]>();
+  for (const ar of artRows) {
+    const arr = artMap.get(ar.playlist_id) ?? [];
+    if (arr.length < 4) {
+      arr.push(ar.artwork_uri ?? null);
+      artMap.set(ar.playlist_id, arr);
+    }
+  }
+
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     createdAt: r.created_at,
     trackCount: r.track_count,
+    recentArtworks: artMap.get(r.id) ?? [],
   }));
 }
 
@@ -256,7 +280,7 @@ export async function createPlaylist(name: string): Promise<Playlist> {
     name.trim(),
     createdAt,
   ]);
-  return { id, name: name.trim(), createdAt, trackCount: 0 };
+  return { id, name: name.trim(), createdAt, trackCount: 0, recentArtworks: [] };
 }
 
 export async function getAutoPlaylistTracks(
@@ -445,42 +469,64 @@ export async function getTracksByAlbum(album: string): Promise<Track[]> {
   return rows.map(mapRowToTrack);
 }
 
-// Artistas con las 4 portadas más recientes
+// Artistas en una sola consulta rápida, ordenados de mayor a menor cantidad de canciones
 export async function getArtistsSummary(): Promise<
   { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
 > {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<{ artist: string; c: number }>(
-    `SELECT artist, COUNT(*) as c FROM tracks WHERE is_hidden = 0 AND is_deleted = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE ASC`
+  const rows = await db.getAllAsync<{ artist: string; artwork_uri: string | null }>(
+    `SELECT artist, artwork_uri
+     FROM tracks
+     WHERE is_hidden = 0 AND is_deleted = 0
+     ORDER BY creation_time DESC`
   );
-  const result = [];
+
+  const map = new Map<string, { name: string; trackCount: number; recentArtworks: (string | null)[] }>();
   for (const r of rows) {
-    const arts = await db.getAllAsync<{ artwork_uri: string | null }>(
-      `SELECT artwork_uri FROM tracks WHERE artist = ? AND is_hidden = 0 AND is_deleted = 0 ORDER BY creation_time DESC LIMIT 4`,
-      [r.artist]
-    );
-    result.push({ name: r.artist, trackCount: r.c, recentArtworks: arts.map((a) => a.artwork_uri) });
+    let entry = map.get(r.artist);
+    if (!entry) {
+      entry = { name: r.artist, trackCount: 0, recentArtworks: [] };
+      map.set(r.artist, entry);
+    }
+    entry.trackCount += 1;
+    if (entry.recentArtworks.length < 4) {
+      entry.recentArtworks.push(r.artwork_uri ?? null);
+    }
   }
-  return result;
+
+  return Array.from(map.values()).sort(
+    (a, b) => b.trackCount - a.trackCount || a.name.localeCompare(b.name)
+  );
 }
 
-// Álbumes con las 4 portadas más recientes
+// Álbumes en una sola consulta rápida, ordenados de mayor a menor cantidad de canciones
 export async function getAlbumsSummary(): Promise<
   { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
 > {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<{ album: string; c: number }>(
-    `SELECT album, COUNT(*) as c FROM tracks WHERE is_hidden = 0 AND is_deleted = 0 GROUP BY album ORDER BY album COLLATE NOCASE ASC`
+  const rows = await db.getAllAsync<{ album: string; artwork_uri: string | null }>(
+    `SELECT album, artwork_uri
+     FROM tracks
+     WHERE is_hidden = 0 AND is_deleted = 0
+     ORDER BY creation_time DESC`
   );
-  const result = [];
+
+  const map = new Map<string, { name: string; trackCount: number; recentArtworks: (string | null)[] }>();
   for (const r of rows) {
-    const arts = await db.getAllAsync<{ artwork_uri: string | null }>(
-      `SELECT artwork_uri FROM tracks WHERE album = ? AND is_hidden = 0 AND is_deleted = 0 ORDER BY creation_time DESC LIMIT 4`,
-      [r.album]
-    );
-    result.push({ name: r.album, trackCount: r.c, recentArtworks: arts.map((a) => a.artwork_uri) });
+    let entry = map.get(r.album);
+    if (!entry) {
+      entry = { name: r.album, trackCount: 0, recentArtworks: [] };
+      map.set(r.album, entry);
+    }
+    entry.trackCount += 1;
+    if (entry.recentArtworks.length < 4) {
+      entry.recentArtworks.push(r.artwork_uri ?? null);
+    }
   }
-  return result;
+
+  return Array.from(map.values()).sort(
+    (a, b) => b.trackCount - a.trackCount || a.name.localeCompare(b.name)
+  );
 }
 
 // Obtiene las canciones de una playlist manual

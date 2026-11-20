@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+    Animated,
     View,
     Text,
     FlatList,
@@ -39,8 +40,24 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
     const { fgColor, mutedColor } = useTheme();
     const { playTrack, addToQueue } = usePlayer();
 
+    const [localTracks, setLocalTracks] = useState<Track[]>(tracks);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+    const enterAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        setLocalTracks(tracks);
+    }, [tracks]);
+
+    // Entrada suave lateral al abrir una carpeta, artista o álbum
+    useEffect(() => {
+        Animated.spring(enterAnim, {
+            toValue: 1,
+            damping: 22,
+            stiffness: 230,
+            useNativeDriver: true,
+        }).start();
+    }, [enterAnim]);
 
     // Maneja el botón físico Atrás en Android para salir de selección o volver a la lista
     useEffect(() => {
@@ -61,17 +78,17 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
         );
     };
 
-    const selectedTracks = tracks.filter((t) => selectedIds.includes(t.id));
+    const selectedTracks = localTracks.filter((t) => selectedIds.includes(t.id));
 
     const handlePlayAll = () => {
-        if (tracks.length === 0) return;
-        playTrack(tracks[0], tracks);
+        if (localTracks.length === 0) return;
+        playTrack(localTracks[0], localTracks);
         onOpenPlayer?.();
     };
 
     const handleShufflePlay = () => {
-        if (tracks.length === 0) return;
-        const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+        if (localTracks.length === 0) return;
+        const shuffled = [...localTracks].sort(() => Math.random() - 0.5);
         playTrack(shuffled[0], shuffled);
         onOpenPlayer?.();
     };
@@ -92,63 +109,80 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                     {
                         text: 'Compartir',
                         onPress: async () => {
-                            await Sharing.shareAsync(selectedTracks[0].uri);
+                            const uri = selectedTracks[0].uri;
                             setSelectedIds([]);
+                            await Sharing.shareAsync(uri);
                         },
                     },
                 ]
             );
             return;
         }
-        await Sharing.shareAsync(selectedTracks[0].uri);
+        const uri = selectedTracks[0].uri;
         setSelectedIds([]);
+        await Sharing.shareAsync(uri);
     };
 
     const handleDeleteSelected = () => {
         if (selectedIds.length === 0) return;
+        const idsToDelete = [...selectedIds];
         Alert.alert(
             'Mover a papelera',
-            `¿Mover ${selectedIds.length} ${selectedIds.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
+            `¿Mover ${idsToDelete.length} ${idsToDelete.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
             [
                 { text: 'Cancelar', style: 'cancel' },
                 {
                     text: 'Mover a papelera',
                     style: 'destructive',
-                    onPress: async () => {
-                        await softDeleteTracks(selectedIds);
+                    onPress: () => {
+                        // Desactiva el selector y retira las pistas de la UI al instante (optimista)
+                        const idSet = new Set(idsToDelete);
                         setSelectedIds([]);
-                        await onTracksChanged?.();
+                        setLocalTracks((prev) => prev.filter((t) => !idSet.has(t.id)));
+                        softDeleteTracks(idsToDelete)
+                            .then(() => onTracksChanged?.())
+                            .catch(() => { });
                     },
                 },
             ]
         );
     };
 
+    const translateX = enterAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [32, 0],
+    });
+
     return (
-        <View style={styles.container}>
-            {selectedIds.length > 0 ? (
-                <SelectionActionBar
-                    selectedCount={selectedIds.length}
-                    totalCount={tracks.length}
-                    onClear={() => setSelectedIds([])}
-                    onToggleSelectAll={() =>
-                        setSelectedIds(
-                            selectedIds.length >= tracks.length ? [] : tracks.map((t) => t.id)
-                        )
-                    }
-                    onAddToQueue={() => {
-                        addToQueue(selectedTracks);
-                        Alert.alert(
-                            'Cola actualizada',
-                            `Se agregaron ${selectedTracks.length} canciones a la cola.`
-                        );
-                        setSelectedIds([]);
-                    }}
-                    onAddToPlaylist={() => setPlaylistModalOpen(true)}
-                    onShare={handleShareSelected}
-                    onDelete={handleDeleteSelected}
-                />
-            ) : (
+        <Animated.View
+            style={[
+                styles.container,
+                { opacity: enterAnim, transform: [{ translateX }] },
+            ]}
+        >
+            <SelectionActionBar
+                selectedCount={selectedIds.length}
+                totalCount={localTracks.length}
+                onClear={() => setSelectedIds([])}
+                onToggleSelectAll={() =>
+                    setSelectedIds(
+                        selectedIds.length >= localTracks.length ? [] : localTracks.map((t) => t.id)
+                    )
+                }
+                onAddToQueue={() => {
+                    addToQueue(selectedTracks);
+                    setSelectedIds([]);
+                    Alert.alert(
+                        'Cola actualizada',
+                        `Se agregaron ${selectedTracks.length} canciones a la cola.`
+                    );
+                }}
+                onAddToPlaylist={() => setPlaylistModalOpen(true)}
+                onShare={handleShareSelected}
+                onDelete={handleDeleteSelected}
+            />
+
+            {selectedIds.length === 0 && (
                 <View style={styles.header}>
                     <TouchableOpacity onPress={onBack} style={styles.backBtn}>
                         <ArrowLeft size={22} color={fgColor} />
@@ -159,10 +193,10 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                         </Text>
                         <Text style={[styles.subtitle, { color: mutedColor }]} numberOfLines={1}>
                             {subtitle ? `${subtitle} • ` : ''}
-                            {tracks.length} {tracks.length === 1 ? 'canción' : 'canciones'}
+                            {localTracks.length} {localTracks.length === 1 ? 'canción' : 'canciones'}
                         </Text>
                     </View>
-                    {tracks.length > 0 && (
+                    {localTracks.length > 0 && (
                         <View style={styles.quickActions}>
                             <TouchableOpacity onPress={handleShufflePlay} style={styles.quickBtn}>
                                 <Shuffle size={18} color={fgColor} />
@@ -176,8 +210,9 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
             )}
 
             <FlatList
-                data={tracks}
+                data={localTracks}
                 keyExtractor={(item) => item.id}
+                extraData={selectedIds}
                 initialNumToRender={15}
                 maxToRenderPerBatch={10}
                 windowSize={5}
@@ -189,7 +224,7 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                             if (selectedIds.length > 0) {
                                 toggleSelect(selected.id);
                             } else {
-                                playTrack(selected, tracks);
+                                playTrack(selected, localTracks);
                                 onOpenPlayer?.();
                             }
                         }}
@@ -210,7 +245,7 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                 onClose={() => setPlaylistModalOpen(false)}
                 onAdded={() => setSelectedIds([])}
             />
-        </View>
+        </Animated.View>
     );
 };
 

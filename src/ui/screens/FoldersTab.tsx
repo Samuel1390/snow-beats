@@ -9,9 +9,14 @@ import { TrackGroupDetail } from '../components/TrackGroupDetail';
 interface FoldersTabProps {
     onOpenPlayer?: () => void;
     onLibraryChanged?: () => Promise<void> | void;
+    refreshKey?: number;
 }
 
-export const FoldersTab: React.FC<FoldersTabProps> = ({ onOpenPlayer, onLibraryChanged }) => {
+export const FoldersTab: React.FC<FoldersTabProps> = ({
+    onOpenPlayer,
+    onLibraryChanged,
+    refreshKey = 0,
+}) => {
     const { fgColor, mutedColor } = useTheme();
     const [showHidden, setShowHidden] = useState(false);
     const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -24,7 +29,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = ({ onOpenPlayer, onLibraryC
 
     useEffect(() => {
         loadFolders();
-    }, [loadFolders]);
+    }, [loadFolders, refreshKey]);
 
     const openFolder = async (folder: FolderItem) => {
         const tracks = await getTracksByFolder(folder.path, showHidden);

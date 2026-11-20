@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Modal,
     View,
@@ -13,41 +13,89 @@ import { Track } from '../../types/music';
 import {
     addSearchHistory,
     getSearchHistory,
+    getVisibleTracks,
     searchTracks,
 } from '../../storage/database/db';
 import { SongCard } from './SongCard';
 
 interface SearchModalProps {
     visible: boolean;
+    tracks?: Track[];
     onClose: () => void;
     onSelectTrack: (track: Track) => void;
 }
 
+// Filtro instantáneo en memoria (prioridad 1.º título, 2.º artista) para respuesta inmediata al teclear o borrar
+function filterTracksInstant(list: Track[], rawQuery: string): Track[] {
+    const clean = rawQuery.trim().toLowerCase();
+    if (!clean) return [];
+    const byTitle: Track[] = [];
+    const byArtist: Track[] = [];
+    for (const track of list) {
+        if (track.title.toLowerCase().includes(clean)) {
+            byTitle.push(track);
+        } else if (track.artist.toLowerCase().includes(clean)) {
+            byArtist.push(track);
+        }
+    }
+    byTitle.sort((a, b) => a.title.localeCompare(b.title));
+    byArtist.sort((a, b) => a.title.localeCompare(b.title));
+    return [...byTitle, ...byArtist];
+}
+
 export const SearchModal: React.FC<SearchModalProps> = ({
     visible,
+    tracks,
     onClose,
     onSelectTrack,
 }) => {
     const [query, setQuery] = useState('');
     const [history, setHistory] = useState<string[]>([]);
     const [results, setResults] = useState<Track[]>([]);
+    const [cachedTracks, setCachedTracks] = useState<Track[]>(tracks ?? []);
+    const requestIdRef = useRef(0);
+
+    // Mantiene la caché sincronizada con la lista principal
+    useEffect(() => {
+        if (tracks) {
+            setCachedTracks(tracks);
+        }
+    }, [tracks]);
 
     useEffect(() => {
-        if (visible) {
-            getSearchHistory().then(setHistory);
+        if (!visible) return;
+        getSearchHistory().then(setHistory).catch(() => { });
+        if (!tracks || tracks.length === 0) {
+            getVisibleTracks('date_desc').then(setCachedTracks).catch(() => { });
         }
-    }, [visible]);
+    }, [visible, tracks]);
 
-    useEffect(() => {
-        if (!query.trim()) {
-            setResults([]);
-            return;
-        }
-        const timer = setTimeout(() => {
-            searchTracks(query).then(setResults);
-        }, 150);
-        return () => clearTimeout(timer);
-    }, [query]);
+    // Actualiza instantáneamente en memoria y reconcilia con SQLite (incluyendo letras) cancelando consultas viejas
+    const runSearch = useCallback(
+        (text: string) => {
+            setQuery(text);
+            const requestId = ++requestIdRef.current;
+
+            if (!text.trim()) {
+                setResults([]);
+                return;
+            }
+
+            // 1. Respuesta inmediata en el mismo frame (0 ms de retraso)
+            const instant = filterTracksInstant(cachedTracks, text);
+            setResults(instant);
+
+            // 2. Consulta fresca en SQLite (agrega coincidencias en letras sin pisar búsquedas más nuevas)
+            searchTracks(text)
+                .then((dbResults) => {
+                    if (requestId === requestIdRef.current) {
+                        setResults(dbResults);
+                    }
+                })
+                .catch(() => { });
+        },
+        [cachedTracks]
+    );
 
     const handleSubmit = async () => {
         if (!query.trim()) return;
@@ -67,12 +115,14 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                         placeholder="Buscar título, artista o letra..."
                         placeholderTextColor="#9CA3AF"
                         value={query}
-                        onChangeText={setQuery}
+                        onChangeText={runSearch}
                         onSubmitEditing={handleSubmit}
+                        returnKeyType="search"
+                        autoCorrect={false}
                         autoFocus
                     />
                     {query.length > 0 && (
-                        <TouchableOpacity onPress={() => setQuery('')} style={styles.iconBtn}>
+                        <TouchableOpacity onPress={() => runSearch('')} style={styles.iconBtn}>
                             <X size={20} color="#9CA3AF" />
                         </TouchableOpacity>
                     )}
@@ -88,7 +138,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                                 <TouchableOpacity
                                     key={item}
                                     style={styles.historyRow}
-                                    onPress={() => setQuery(item)}
+                                    onPress={() => runSearch(item)}
                                 >
                                     <Clock size={16} color="#9CA3AF" />
                                     <Text style={styles.historyText}>{item}</Text>
@@ -100,6 +150,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     <FlatList
                         data={results}
                         keyExtractor={(item) => item.id}
+                        keyboardShouldPersistTaps="handled"
                         renderItem={({ item }) => (
                             <SongCard
                                 track={item}

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Check } from 'lucide-react-native';
 import { SortOption } from '../../types/music';
+import { AnimatedBottomSheet } from './AnimatedBottomSheet';
 
 const SORT_OPTIONS: { key: SortOption; label: string }[] = [
     { key: 'date_desc', label: 'Más reciente (por defecto)' },
@@ -27,41 +28,28 @@ export const SortModal: React.FC<SortModalProps> = ({
     onSelect,
     onClose,
 }) => (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-            <View style={styles.sheet}>
-                <Text style={styles.title}>Ordenar por</Text>
-                {SORT_OPTIONS.map((opt) => (
-                    <TouchableOpacity
-                        key={opt.key}
-                        style={styles.row}
-                        onPress={() => {
-                            onSelect(opt.key);
-                            onClose();
-                        }}
-                    >
-                        <Text style={styles.label}>{opt.label}</Text>
-                        {currentSort === opt.key && <Check size={18} color="#FFFFFF" />}
-                    </TouchableOpacity>
-                ))}
-            </View>
-        </TouchableOpacity>
-    </Modal>
+    <AnimatedBottomSheet visible={visible} onClose={onClose}>
+        <Text style={styles.title}>Ordenar por</Text>
+        {SORT_OPTIONS.map((opt) => (
+            <TouchableOpacity
+                key={opt.key}
+                style={styles.row}
+                onPress={() => {
+                    onSelect(opt.key);
+                    onClose();
+                }}
+            >
+                <Text style={[styles.label, currentSort === opt.key && styles.labelActive]}>
+                    {opt.label}
+                </Text>
+                {currentSort === opt.key && <Check size={18} color="#38BDF8" />}
+            </TouchableOpacity>
+        ))}
+    </AnimatedBottomSheet>
 );
 
 const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.65)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        backgroundColor: '#111827',
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        padding: 20,
-    },
-    title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', marginBottom: 12 },
+    title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', marginBottom: 10 },
     row: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -69,4 +57,5 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     label: { color: '#E5E7EB', fontSize: 15 },
+    labelActive: { color: '#38BDF8', fontWeight: '700' },
 });

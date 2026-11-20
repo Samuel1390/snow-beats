@@ -13,9 +13,9 @@ export const CollageArtwork: React.FC<CollageArtworkProps> = ({
     totalTracks,
     size = 52,
 }) => {
-    // 1 a 3 canciones: usa solo la más reciente
+    // 1 a 3 canciones: usa la carátula más reciente disponible
     if (totalTracks < 4) {
-        const first = artworks[0];
+        const first = artworks.find((uri) => Boolean(uri)) ?? null;
         return (
             <View style={[styles.single, { width: size, height: size }]}>
                 {first ? (
