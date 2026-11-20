@@ -130,6 +130,27 @@ export async function updateTrackMetadata(
   );
 }
 
+// Obtiene la letra almacenada en SQLite para una pista
+export async function getTrackLyrics(trackId: string): Promise<string | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ lyrics_text: string | null }>(
+    `SELECT lyrics_text FROM tracks WHERE id = ?`,
+    [trackId]
+  );
+  const text = row?.lyrics_text?.trim();
+  return text ? text : null;
+}
+
+// Guarda o actualiza la letra extraída de una pista y marca has_lyrics
+export async function updateTrackLyrics(trackId: string, lyricsText: string | null): Promise<void> {
+  const db = await getDatabase();
+  const clean = lyricsText?.trim() ?? '';
+  await db.runAsync(
+    `UPDATE tracks SET lyrics_text = ?, has_lyrics = ? WHERE id = ?`,
+    [clean, clean.length > 0 ? 1 : 0, trackId]
+  );
+}
+
 // Inserta o actualiza canciones en lotes de 50
 export async function upsertScannedTracks(tracks: Track[]): Promise<void> {
   if (tracks.length === 0) return;

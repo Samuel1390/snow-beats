@@ -114,6 +114,22 @@ export async function updateTrackMetadata(
   saveState(state);
 }
 
+export async function getTrackLyrics(trackId: string): Promise<string | null> {
+  const state = loadState();
+  const found = state.tracks.find((t) => t.id === trackId);
+  const text = found?.lyricsText?.trim();
+  return text ? text : null;
+}
+
+export async function updateTrackLyrics(trackId: string, lyricsText: string | null): Promise<void> {
+  const state = loadState();
+  const clean = lyricsText?.trim() ?? '';
+  state.tracks = state.tracks.map((t) =>
+    t.id === trackId ? { ...t, lyricsText: clean, hasLyrics: clean.length > 0 } : t
+  );
+  saveState(state);
+}
+
 export async function upsertScannedTracks(tracks: Track[]): Promise<void> {
   if (tracks.length === 0) return;
   const state = loadState();

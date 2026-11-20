@@ -14,6 +14,7 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
 import {
     ChevronDown,
@@ -36,11 +37,16 @@ import {
     AlarmClock,
     EyeOff,
     Trash2,
+    Share2,
 } from 'lucide-react-native';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
+import { loadTrackLyrics, ParsedLyrics } from '../../audio-engine/lyricsParser';
 import { getDynamicPlayerPalette } from '../../theme/colorContrast';
 import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 import { AnimatedBottomSheet } from '../components/AnimatedBottomSheet';
+import { LyricsTicker } from '../components/LyricsTicker';
+import { LyricsSheetModal } from '../components/LyricsSheetModal';
+import { ShareCardModal } from '../components/ShareCardModal';
 
 function formatTime(sec: number): string {
     const m = Math.floor(sec / 60);
@@ -115,13 +121,21 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             deleteCurrentTrack,
         } = usePlayer();
 
-        const { height: screenHeight } = useWindowDimensions();
+        const { width: screenWidth, height: screenHeight } = useWindowDimensions();
         const [mounted, setMounted] = useState(visible);
         const [menuOpen, setMenuOpen] = useState(false);
         const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
         const [speedOpen, setSpeedOpen] = useState(false);
         const [deleteOpen, setDeleteOpen] = useState(false);
         const [askDeleteAgain, setAskDeleteAgain] = useState(true);
+        const [parsedLyrics, setParsedLyrics] = useState<ParsedLyrics | null>(null);
+        const [lyricsSheetOpen, setLyricsSheetOpen] = useState(false);
+        const [shareModalState, setShareModalState] = useState<{
+            open: boolean;
+            mode: 'song' | 'lyrics';
+            step: 'select_lyrics' | 'preview';
+            lineIndex: number;
+        }>({ open: false, mode: 'song', step: 'preview', lineIndex: 0 });
 
         const openAnim = useRef(new Animated.Value(0)).current;
         const dragY = useRef(new Animated.Value(0)).current;
@@ -130,6 +144,23 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
         const isClosingRef = useRef(false);
         const isSlidingRef = useRef(false);
         const prevVisibleRef = useRef(false);
+
+        // Carga perezosa de letras incrustadas/.lrc (con caché en RAM + SQLite) solo para la pista activa
+        useEffect(() => {
+            let cancelled = false;
+            if (!visible || !currentTrack) {
+                return;
+            }
+            setParsedLyrics(null);
+            loadTrackLyrics(currentTrack)
+                .then((res) => {
+                    if (!cancelled) setParsedLyrics(res);
+                })
+                .catch(() => { });
+            return () => {
+                cancelled = true;
+            };
+        }, [visible, currentTrack?.id]);
 
         // Slide-in fluido de abajo hacia arriba (solo se dispara al transicionar visible false -> true)
         useEffect(() => {
@@ -384,6 +415,10 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             },
                         ]}
                     >
+                        <LinearGradient
+                            colors={[palette.background, palette.backgroundBottom]}
+                            style={StyleSheet.absoluteFill}
+                        />
                         <View>
                             <View style={styles.dragPill} />
                             <TouchableOpacity onPress={animateClose} style={styles.topBtn}>
@@ -394,6 +429,10 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             <Animated.View
                                 style={[
                                     styles.artWrapper,
+                                    parsedLyrics && {
+                                        width: Math.min(screenWidth - 48, Math.round(screenHeight * 0.36)),
+                                        alignSelf: 'center',
+                                    },
                                     {
                                         opacity: openAnim,
                                         transform: [{ translateY: artTranslateY }, { scale: artScale }],
@@ -438,6 +477,16 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                     <MoreVertical size={24} color={palette.foreground} />
                                 </TouchableOpacity>
                             </Animated.View>
+
+                            {/* Carrusel vertical de letras en tiempo real debajo del título */}
+                            {parsedLyrics && parsedLyrics.lines.length > 0 ? (
+                                <Animated.View style={{ opacity: openAnim }}>
+                                    <LyricsTicker
+                                        lyrics={parsedLyrics}
+                                        onPress={() => setLyricsSheetOpen(true)}
+                                    />
+                                </Animated.View>
+                            ) : null}
                         </View>
 
                         {/* Seekbar aislado y controles */}
@@ -485,21 +534,41 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.footerBtn}
+                                onPress={() => {
+                                    if (parsedLyrics && parsedLyrics.lines.length > 0) {
+                                        setLyricsSheetOpen(true);
+                                    } else {
+                                        Alert.alert(
+                                            'Letras',
+                                            'Esta canción no tiene letra incrustada ni archivo .lrc asociado.'
+                                        );
+                                    }
+                                }}
+                            >
+                                <FileText
+                                    size={22}
+                                    color={parsedLyrics ? '#38BDF8' : palette.foreground}
+                                />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.footerBtn}
                                 onPress={() =>
-                                    Alert.alert(
-                                        'Letras',
-                                        currentTrack.hasLyrics ? 'Mostrando letra...' : 'Esta canción no tiene letra asociada.'
-                                    )
+                                    setShareModalState({
+                                        open: true,
+                                        mode: 'song',
+                                        step: 'preview',
+                                        lineIndex: 0,
+                                    })
                                 }
                             >
-                                <FileText size={22} color={palette.foreground} />
+                                <Share2 size={21} color={palette.foreground} />
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.footerBtn} onPress={cycleRepeatMode}>
                                 <RepeatIcon size={22} color={palette.foreground} />
                             </TouchableOpacity>
                         </Animated.View>
 
-                        {/* Bottom Sheet de 7 opciones con slide-in / slide-out */}
+                        {/* Bottom Sheet de opciones con slide-in / slide-out */}
                         <AnimatedBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -511,9 +580,24 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 <Plus size={20} color="#FFFFFF" />
                                 <Text style={styles.sheetText}>Agregar a playlist</Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.sheetItem}
+                                onPress={() => {
+                                    setMenuOpen(false);
+                                    setShareModalState({
+                                        open: true,
+                                        mode: 'song',
+                                        step: 'preview',
+                                        lineIndex: 0,
+                                    });
+                                }}
+                            >
+                                <Share2 size={20} color="#FFFFFF" />
+                                <Text style={styles.sheetText}>Compartir tarjeta</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity style={styles.sheetItem} onPress={handleShare}>
                                 <Forward size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Compartir archivo</Text>
+                                <Text style={styles.sheetText}>Compartir archivo de audio</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -640,6 +724,38 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             trackIds={[currentTrack.id]}
                             onClose={() => setPlaylistModalOpen(false)}
                             onAdded={() => onPlaylistUpdated?.()}
+                        />
+
+                        {/* Hoja deslizable de letras sincronizadas en tiempo real */}
+                        {parsedLyrics && (
+                            <LyricsSheetModal
+                                visible={lyricsSheetOpen}
+                                track={currentTrack}
+                                lyrics={parsedLyrics}
+                                onClose={() => setLyricsSheetOpen(false)}
+                                onOpenShareLyrics={(lineIdx = 0) => {
+                                    setLyricsSheetOpen(false);
+                                    setTimeout(() => {
+                                        setShareModalState({
+                                            open: true,
+                                            mode: 'lyrics',
+                                            step: 'select_lyrics',
+                                            lineIndex: lineIdx,
+                                        });
+                                    }, 230);
+                                }}
+                            />
+                        )}
+
+                        {/* Constructor y compartidor de tarjetas (Canción y Letra) con marca Snow Beats */}
+                        <ShareCardModal
+                            visible={shareModalState.open}
+                            track={currentTrack}
+                            lyrics={parsedLyrics}
+                            initialMode={shareModalState.mode}
+                            initialStep={shareModalState.step}
+                            initialLineIndex={shareModalState.lineIndex}
+                            onClose={() => setShareModalState((prev) => ({ ...prev, open: false }))}
                         />
                     </Animated.View>
                 </View>

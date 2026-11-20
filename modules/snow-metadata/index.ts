@@ -8,8 +8,27 @@ export interface NativeTrackTags {
     dominantColor?: string | null;
 }
 
+export interface RenderShareCardOptions {
+    mode: 'song' | 'lyrics';
+    title: string;
+    artist: string;
+    artworkUri?: string | null;
+    logoUri?: string | null;
+    bgImageUri?: string | null;
+    bgColor: string;
+    bgColorBottom: string;
+    textColor: string;
+    mutedColor: string;
+    fontStyle: 'classic' | 'wide' | 'narrow' | 'italic';
+    textAlign: 'left' | 'center' | 'right';
+    uppercase: boolean;
+    lines: string[];
+}
+
 interface SnowMetadataNativeModule {
     readTrackTags(uri: string, trackId: string): Promise<NativeTrackTags | null>;
+    readTrackLyrics?: (uri: string) => Promise<string | null>;
+    renderShareCard?: (options: RenderShareCardOptions) => Promise<string | null>;
 }
 
 const SnowMetadata = requireOptionalNativeModule<SnowMetadataNativeModule>('SnowMetadata');
@@ -23,4 +42,22 @@ export async function readTrackTags(
         return null;
     }
     return SnowMetadata.readTrackTags(uri, trackId);
+}
+
+// Lee letras incrustadas (ID3/MP4/FLAC/OGG) o archivo .lrc hermano desde Kotlin
+export async function readTrackLyrics(uri: string): Promise<string | null> {
+    if (!SnowMetadata || typeof SnowMetadata.readTrackLyrics !== 'function') {
+        return null;
+    }
+    return SnowMetadata.readTrackLyrics(uri);
+}
+
+// Renderiza la tarjeta PNG de canción o letra en alta resolución en Android
+export async function renderShareCard(
+    options: RenderShareCardOptions
+): Promise<string | null> {
+    if (!SnowMetadata || typeof SnowMetadata.renderShareCard !== 'function') {
+        return null;
+    }
+    return SnowMetadata.renderShareCard(options);
 }

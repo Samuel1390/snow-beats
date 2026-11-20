@@ -14,11 +14,13 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { Film, X, LayoutGrid, List } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeContext';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 
 const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.memo(
     ({ uri, onClose }) => {
+        const insets = useSafeAreaInsets();
         const [ready, setReady] = useState(false);
         const player = useVideoPlayer(uri);
 
@@ -38,10 +40,14 @@ const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.m
         }, [player]);
 
         return (
-            <Modal visible animationType="fade" onRequestClose={onClose}>
+            <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
                 <View style={styles.modalBg}>
-                    <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-                        <X size={26} color="#FFFFFF" />
+                    <TouchableOpacity
+                        style={[styles.closeBtn, { top: Math.max(insets.top, 24) + 12 }]}
+                        onPress={onClose}
+                        activeOpacity={0.8}
+                    >
+                        <X size={24} color="#FFFFFF" />
                     </TouchableOpacity>
 
                     {!ready && (
@@ -53,6 +59,7 @@ const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.m
                     <VideoView
                         player={player}
                         style={styles.video}
+                        contentFit="contain"
                         nativeControls
                         onFirstFrameRender={() => setReady(true)}
                     />
@@ -319,8 +326,18 @@ const styles = StyleSheet.create({
     },
     fill: { width: '100%', height: '100%' },
     name: { fontSize: 13, fontWeight: '600' },
-    modalBg: { flex: 1, backgroundColor: '#000000', justifyContent: 'center' },
-    closeBtn: { position: 'absolute', top: 44, right: 16, zIndex: 10, padding: 8 },
+    modalBg: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' },
+    closeBtn: {
+        position: 'absolute',
+        right: 16,
+        zIndex: 20,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     loaderOverlay: {
         position: 'absolute',
         top: 0,
@@ -331,5 +348,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         zIndex: 5,
     },
-    video: { width: '100%', height: 300 },
+    // Ocupa el 100% de la pantalla para que videos verticales y horizontales aprovechen todo el espacio
+    video: { width: '100%', height: '100%' },
 });
