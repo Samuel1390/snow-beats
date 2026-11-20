@@ -8,7 +8,7 @@ interface CollageArtworkProps {
     size?: number;
 }
 
-export const CollageArtwork: React.FC<CollageArtworkProps> = ({
+export const CollageArtwork: React.FC<CollageArtworkProps> = React.memo(({
     artworks,
     totalTracks,
     size = 52,
@@ -44,7 +44,7 @@ export const CollageArtwork: React.FC<CollageArtworkProps> = ({
             ))}
         </View>
     );
-};
+});
 
 const styles = StyleSheet.create({
     single: {

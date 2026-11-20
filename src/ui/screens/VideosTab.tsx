@@ -1,48 +1,241 @@
-import React, { useEffect, useState } from 'react';
-import { FlatList, View, Text, TouchableOpacity, Modal, Image, StyleSheet, Platform } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    View,
+    Text,
+    TouchableOpacity,
+    Modal,
+    Image,
+    StyleSheet,
+    Platform,
+} from 'react-native';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { Film, X, LayoutGrid, List } from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeContext';
+import { usePlayer } from '../../audio-engine/PlayerContext';
 
-const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = ({ uri, onClose }) => {
-    const player = useVideoPlayer(uri, (p) => { p.play(); });
-    return (
-        <Modal visible animationType="fade" onRequestClose={onClose}>
-            <View style={styles.modalBg}>
-                <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-                    <X size={26} color="#FFFFFF" />
-                </TouchableOpacity>
-                <VideoView player={player} style={styles.video} nativeControls />
+const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.memo(
+    ({ uri, onClose }) => {
+        const [ready, setReady] = useState(false);
+        const player = useVideoPlayer(uri);
+
+        // Inicia la reproducción en el siguiente frame para evitar congelar la apertura del Modal
+        useEffect(() => {
+            const raf = requestAnimationFrame(() => {
+                try {
+                    player.play();
+                } catch { }
+            });
+            return () => {
+                cancelAnimationFrame(raf);
+                try {
+                    player.pause();
+                } catch { }
+            };
+        }, [player]);
+
+        return (
+            <Modal visible animationType="fade" onRequestClose={onClose}>
+                <View style={styles.modalBg}>
+                    <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+                        <X size={26} color="#FFFFFF" />
+                    </TouchableOpacity>
+
+                    {!ready && (
+                        <View style={styles.loaderOverlay} pointerEvents="none">
+                            <ActivityIndicator size="large" color="#FFFFFF" />
+                        </View>
+                    )}
+
+                    <VideoView
+                        player={player}
+                        style={styles.video}
+                        nativeControls
+                        onFirstFrameRender={() => setReady(true)}
+                    />
+                </View>
+            </Modal>
+        );
+    }
+);
+
+const VideoItemCard: React.FC<{
+    item: MediaLibrary.Asset;
+    thumb?: string;
+    viewMode: 'grid' | 'list';
+    fgColor: string;
+    mutedColor: string;
+    onSelect: (uri: string) => void;
+}> = React.memo(({ item, thumb, viewMode, fgColor, mutedColor, onSelect }) =>
+    viewMode === 'grid' ? (
+        <TouchableOpacity style={styles.gridCard} activeOpacity={0.75} onPress={() => onSelect(item.uri)}>
+            <View style={styles.gridThumb}>
+                {thumb ? (
+                    <Image source={{ uri: thumb }} style={styles.fill} />
+                ) : (
+                    <Film size={28} color="#9CA3AF" />
+                )}
             </View>
-        </Modal>
-    );
-};
+            <Text style={[styles.name, { color: fgColor, marginTop: 6 }]} numberOfLines={1}>
+                {item.filename}
+            </Text>
+        </TouchableOpacity>
+    ) : (
+        <TouchableOpacity style={styles.listRow} activeOpacity={0.75} onPress={() => onSelect(item.uri)}>
+            <View style={styles.listThumb}>
+                {thumb ? (
+                    <Image source={{ uri: thumb }} style={styles.fill} />
+                ) : (
+                    <Film size={20} color="#9CA3AF" />
+                )}
+            </View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
+                    {item.filename}
+                </Text>
+                <Text style={{ color: mutedColor, fontSize: 12 }}>{Math.round(item.duration)}s</Text>
+            </View>
+        </TouchableOpacity>
+    )
+);
 
-export const VideosTab: React.FC = () => {
+export const VideosTab: React.FC = React.memo(() => {
     const { fgColor, mutedColor } = useTheme();
+    const { pausePlayback } = usePlayer();
     const [videos, setVideos] = useState<MediaLibrary.Asset[]>([]);
     const [thumbs, setThumbs] = useState<Record<string, string>>({});
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid'); // Cuadrícula por defecto
     const [selectedUri, setSelectedUri] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (Platform.OS === 'web') return;
-        MediaLibrary.requestPermissionsAsync(false, ['video']).then(async (res) => {
-            if (!res.granted) return;
-            const page = await MediaLibrary.getAssetsAsync({ mediaType: 'video', first: 100 });
-            setVideos(page.assets);
+    const mountedRef = useRef(true);
+    const pausedThumbsRef = useRef(false);
+    const requestedIdsRef = useRef<Set<string>>(new Set());
+    const queueRef = useRef<MediaLibrary.Asset[]>([]);
+    const processingRef = useRef(false);
 
-            // Extrae el primer frame (time: 0) en segundo plano
-            for (const v of page.assets) {
+    // Extrae miniaturas de forma perezosa y pausable para NO saturar MediaCodec al abrir un video
+    const processThumbQueue = useCallback(async () => {
+        if (processingRef.current || pausedThumbsRef.current) return;
+        processingRef.current = true;
+        try {
+            let pendingBatch: Record<string, string> = {};
+            let batchCount = 0;
+
+            while (queueRef.current.length > 0 && mountedRef.current && !pausedThumbsRef.current) {
+                const asset = queueRef.current.shift()!;
                 try {
-                    const { uri } = await VideoThumbnails.getThumbnailAsync(v.uri, { time: 0 });
-                    setThumbs((prev) => ({ ...prev, [v.id]: uri }));
+                    const { uri } = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+                        time: 0,
+                        quality: 0.4,
+                    });
+                    if (!mountedRef.current) break;
+                    pendingBatch[asset.id] = uri;
+                    batchCount += 1;
+
+                    if (batchCount >= 3 || queueRef.current.length === 0) {
+                        const commit = pendingBatch;
+                        pendingBatch = {};
+                        batchCount = 0;
+                        setThumbs((prev) => ({ ...prev, ...commit }));
+                    }
                 } catch { }
+
+                // Cede el hilo entre decodificaciones para mantener 60fps
+                await new Promise((r) => setTimeout(r, 45));
             }
-        });
+
+            if (batchCount > 0 && mountedRef.current) {
+                setThumbs((prev) => ({ ...prev, ...pendingBatch }));
+            }
+        } finally {
+            processingRef.current = false;
+        }
     }, []);
+
+    const enqueueThumbnails = useCallback(
+        (assets: MediaLibrary.Asset[]) => {
+            let added = false;
+            for (const a of assets) {
+                if (!requestedIdsRef.current.has(a.id)) {
+                    requestedIdsRef.current.add(a.id);
+                    queueRef.current.push(a);
+                    added = true;
+                }
+            }
+            if (added && !pausedThumbsRef.current) {
+                processThumbQueue();
+            }
+        },
+        [processThumbQueue]
+    );
+
+    useEffect(() => {
+        mountedRef.current = true;
+        if (Platform.OS === 'web') return;
+
+        MediaLibrary.requestPermissionsAsync(false, ['video'])
+            .then(async (res) => {
+                if (!res.granted || !mountedRef.current) return;
+                const page = await MediaLibrary.getAssetsAsync({ mediaType: 'video', first: 100 });
+                if (!mountedRef.current) return;
+                setVideos(page.assets);
+                // Solo decodifica inicialmente las primeras 8 miniaturas visibles
+                enqueueThumbnails(page.assets.slice(0, 8));
+            })
+            .catch(() => { });
+
+        return () => {
+            mountedRef.current = false;
+        };
+    }, [enqueueThumbnails]);
+
+    const handleOpenVideo = useCallback(
+        (uri: string) => {
+            // Pausa decodificación de miniaturas y audio activo para liberar MediaCodec y AudioFocus al instante
+            pausedThumbsRef.current = true;
+            pausePlayback();
+            setSelectedUri(uri);
+        },
+        [pausePlayback]
+    );
+
+    const handleCloseVideo = useCallback(() => {
+        setSelectedUri(null);
+        pausedThumbsRef.current = false;
+        if (queueRef.current.length > 0) {
+            processThumbQueue();
+        }
+    }, [processThumbQueue]);
+
+    const onViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: Array<{ item?: unknown }> }) => {
+            const visibleAssets = viewableItems
+                .map((v) => v.item as MediaLibrary.Asset | undefined)
+                .filter((a): a is MediaLibrary.Asset => Boolean(a));
+            if (visibleAssets.length > 0) {
+                enqueueThumbnails(visibleAssets);
+            }
+        }
+    ).current;
+
+    const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
+
+    const renderItem = useCallback(
+        ({ item }: { item: MediaLibrary.Asset }) => (
+            <VideoItemCard
+                item={item}
+                thumb={thumbs[item.id]}
+                viewMode={viewMode}
+                fgColor={fgColor}
+                mutedColor={mutedColor}
+                onSelect={handleOpenVideo}
+            />
+        ),
+        [thumbs, viewMode, fgColor, mutedColor, handleOpenVideo]
+    );
 
     return (
         <View style={{ flex: 1 }}>
@@ -70,43 +263,26 @@ export const VideosTab: React.FC = () => {
                 numColumns={viewMode === 'grid' ? 2 : 1}
                 data={videos}
                 keyExtractor={(item) => item.id}
+                initialNumToRender={8}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
                 contentContainerStyle={{ padding: 12 }}
                 columnWrapperStyle={viewMode === 'grid' ? { gap: 10 } : undefined}
-                renderItem={({ item }) =>
-                    viewMode === 'grid' ? (
-                        <TouchableOpacity style={styles.gridCard} onPress={() => setSelectedUri(item.uri)}>
-                            <View style={styles.gridThumb}>
-                                {thumbs[item.id] ? (
-                                    <Image source={{ uri: thumbs[item.id] }} style={styles.fill} />
-                                ) : (
-                                    <Film size={28} color="#9CA3AF" />
-                                )}
-                            </View>
-                            <Text style={[styles.name, { color: fgColor, marginTop: 6 }]} numberOfLines={1}>
-                                {item.filename}
-                            </Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.listRow} onPress={() => setSelectedUri(item.uri)}>
-                            <View style={styles.listThumb}>
-                                {thumbs[item.id] ? (
-                                    <Image source={{ uri: thumbs[item.id] }} style={styles.fill} />
-                                ) : (
-                                    <Film size={20} color="#9CA3AF" />
-                                )}
-                            </View>
-                            <View style={{ marginLeft: 12, flex: 1 }}>
-                                <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>{item.filename}</Text>
-                                <Text style={{ color: mutedColor, fontSize: 12 }}>{Math.round(item.duration)}s</Text>
-                            </View>
-                        </TouchableOpacity>
-                    )
+                renderItem={renderItem}
+                ListEmptyComponent={
+                    <Text style={{ color: mutedColor, textAlign: 'center', marginTop: 32 }}>
+                        {Platform.OS === 'web'
+                            ? 'Los videos locales se escanean en Android.'
+                            : 'No se encontraron videos locales.'}
+                    </Text>
                 }
             />
-            {selectedUri && <VideoModalPlayer uri={selectedUri} onClose={() => setSelectedUri(null)} />}
+            {selectedUri && <VideoModalPlayer uri={selectedUri} onClose={handleCloseVideo} />}
         </View>
     );
-};
+});
 
 const styles = StyleSheet.create({
     toolbar: {
@@ -145,5 +321,15 @@ const styles = StyleSheet.create({
     name: { fontSize: 13, fontWeight: '600' },
     modalBg: { flex: 1, backgroundColor: '#000000', justifyContent: 'center' },
     closeBtn: { position: 'absolute', top: 44, right: 16, zIndex: 10, padding: 8 },
+    loaderOverlay: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 5,
+    },
     video: { width: '100%', height: 300 },
 });

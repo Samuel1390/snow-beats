@@ -31,7 +31,7 @@ interface PlaylistsTabProps {
     refreshKey?: number;
 }
 
-export const PlaylistsTab: React.FC<PlaylistsTabProps> = ({ onOpenPlayer, refreshKey = 0 }) => {
+export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(({ onOpenPlayer, refreshKey = 0 }) => {
     const { fgColor, mutedColor } = useTheme();
     const { playTrack } = usePlayer();
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -226,7 +226,7 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = ({ onOpenPlayer, refres
             </AnimatedBottomSheet>
         </View>
     );
-};
+});
 
 const styles = StyleSheet.create({
     container: { flex: 1, padding: 16 },

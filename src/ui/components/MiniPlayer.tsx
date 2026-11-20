@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Music, Play, Pause, Repeat, Repeat1, Shuffle } from 'lucide-react-native';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
@@ -9,10 +9,28 @@ interface MiniPlayerProps {
     onExpand: () => void;
 }
 
-export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
+// Slider aislado: únicamente esta barra se re-renderiza cada 400ms con el progreso
+const MiniTopSlider: React.FC<{ foreground: string; onSeek: (sec: number) => void }> = React.memo(
+    ({ foreground, onSeek }) => {
+        const { position, duration } = usePlayerProgress();
+        return (
+            <Slider
+                style={styles.topSlider}
+                minimumValue={0}
+                maximumValue={Math.max(1, duration)}
+                value={position}
+                onSlidingComplete={onSeek}
+                minimumTrackTintColor={foreground}
+                maximumTrackTintColor="rgba(255,255,255,0.22)"
+                thumbTintColor={foreground}
+            />
+        );
+    }
+);
+
+export const MiniPlayer: React.FC<MiniPlayerProps> = React.memo(({ onExpand }) => {
     const { currentTrack, isPlaying, repeatMode, togglePlayPause, cycleRepeatMode, seekTo } =
         usePlayer();
-    const { position, duration } = usePlayerProgress();
     const entranceAnim = useRef(new Animated.Value(currentTrack ? 1 : 0)).current;
     const playScale = useRef(new Animated.Value(1)).current;
     const hasShownRef = useRef(Boolean(currentTrack));
@@ -31,9 +49,13 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
         }
     }, [currentTrack, entranceAnim]);
 
+    const palette = useMemo(
+        () => getDynamicPlayerPalette(currentTrack?.dominantColor),
+        [currentTrack?.dominantColor]
+    );
+
     if (!currentTrack) return null;
 
-    const palette = getDynamicPlayerPalette(currentTrack.dominantColor);
     const RepeatIcon =
         repeatMode === 'repeat_one' ? Repeat1 : repeatMode === 'shuffle' ? Shuffle : Repeat;
 
@@ -61,17 +83,8 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
                 },
             ]}
         >
-            {/* Barra de progreso interactiva en el borde superior */}
-            <Slider
-                style={styles.topSlider}
-                minimumValue={0}
-                maximumValue={Math.max(1, duration)}
-                value={position}
-                onSlidingComplete={seekTo}
-                minimumTrackTintColor={palette.foreground}
-                maximumTrackTintColor="rgba(255,255,255,0.22)"
-                thumbTintColor={palette.foreground}
-            />
+            {/* Barra de progreso interactiva aislada */}
+            <MiniTopSlider foreground={palette.foreground} onSeek={seekTo} />
 
             <TouchableOpacity style={styles.row} activeOpacity={0.9} onPress={onExpand}>
                 <View style={styles.artBox}>
@@ -107,7 +120,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
             </TouchableOpacity>
         </Animated.View>
     );
-};
+});
 
 const styles = StyleSheet.create({
     wrapper: {

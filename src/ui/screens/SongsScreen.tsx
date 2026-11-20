@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
     Animated,
     View,
@@ -27,7 +27,7 @@ import { requestAudioPermission } from '../../permissions/audioPermissions';
 import { scanLocalAudioLibrary } from '../../storage/scanner/mediaScanner';
 import { AlphabetIndex } from '../components/AlphabetIndex';
 import { getVisibleTracks, softDeleteTracks, updateTrackMetadata } from '../../storage/database/db';
-import { SongCard } from '../components/SongCard';
+import { SONG_CARD_HEIGHT, SongCard } from '../components/SongCard';
 import { useTheme } from '../../theme/ThemeContext';
 import { SortModal } from '../components/SortModal';
 import { SearchModal } from '../components/SearchModal';
@@ -50,6 +50,152 @@ const TABS: { key: MainTab; label: string }[] = [
     { key: 'albums', label: 'Álbumes' },
     { key: 'videos', label: 'Videos' },
 ];
+
+const INDICATOR_BASE_WIDTH = 100;
+
+interface SongsListPaneProps {
+    tracks: Track[];
+    sortBy: SortOption;
+    selectedIds: string[];
+    mutedColor: string;
+    onToggleSelect: (id: string) => void;
+    onClearSelect: () => void;
+    onToggleSelectAll: () => void;
+    onPlayTrack: (track: Track) => void;
+    onAddToQueue: () => void;
+    onOpenPlaylistModal: () => void;
+    onShareSelected: () => void;
+    onDeleteSelected: () => void;
+    onWebFilesAdded: () => Promise<void>;
+}
+
+// Subcomponente memoizado para la lista de 1300+ canciones: evita re-renders al cambiar pestañas o abrir el reproductor
+const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
+    ({
+        tracks,
+        sortBy,
+        selectedIds,
+        mutedColor,
+        onToggleSelect,
+        onClearSelect,
+        onToggleSelectAll,
+        onPlayTrack,
+        onAddToQueue,
+        onOpenPlaylistModal,
+        onShareSelected,
+        onDeleteSelected,
+        onWebFilesAdded,
+    }) => {
+        const listRef = useRef<FlatList<Track>>(null);
+        const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+        const hasSelectionRef = useRef(selectedIds.length > 0);
+        hasSelectionRef.current = selectedIds.length > 0;
+
+        // Callbacks estables para que React.memo en SongCard evite re-renderizar filas intactas
+        const handlePress = useCallback(
+            (selected: Track) => {
+                if (hasSelectionRef.current) {
+                    onToggleSelect(selected.id);
+                } else {
+                    onPlayTrack(selected);
+                }
+            },
+            [onToggleSelect, onPlayTrack]
+        );
+
+        const handleSelectCard = useCallback(
+            (selected: Track) => {
+                onToggleSelect(selected.id);
+            },
+            [onToggleSelect]
+        );
+
+        const renderItem = useCallback(
+            ({ item }: { item: Track }) => (
+                <SongCard
+                    track={item}
+                    selected={selectedSet.has(item.id)}
+                    onPress={handlePress}
+                    onLongPress={handleSelectCard}
+                    onArtworkPress={handleSelectCard}
+                />
+            ),
+            [selectedSet, handlePress, handleSelectCard]
+        );
+
+        const getItemLayout = useCallback(
+            (_: ArrayLike<Track> | null | undefined, index: number) => ({
+                length: SONG_CARD_HEIGHT,
+                offset: SONG_CARD_HEIGHT * index,
+                index,
+            }),
+            []
+        );
+
+        const handleSelectLetter = useCallback(
+            (letter: string) => {
+                const idx = tracks.findIndex((t) =>
+                    (sortBy.startsWith('artist') ? t.artist : t.title)
+                        .toUpperCase()
+                        .startsWith(letter)
+                );
+                if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true });
+            },
+            [tracks, sortBy]
+        );
+
+        return (
+            <View style={{ flex: 1 }}>
+                <SelectionActionBar
+                    selectedCount={selectedIds.length}
+                    totalCount={tracks.length}
+                    onClear={onClearSelect}
+                    onToggleSelectAll={onToggleSelectAll}
+                    onAddToQueue={onAddToQueue}
+                    onAddToPlaylist={onOpenPlaylistModal}
+                    onShare={onShareSelected}
+                    onDelete={onDeleteSelected}
+                />
+
+                <FlatList
+                    ref={listRef}
+                    data={tracks}
+                    keyExtractor={(item) => item.id}
+                    extraData={selectedSet}
+                    getItemLayout={getItemLayout}
+                    initialNumToRender={16}
+                    maxToRenderPerBatch={12}
+                    windowSize={7}
+                    renderItem={renderItem}
+                    ListEmptyComponent={
+                        <View style={styles.centered}>
+                            <Text style={[styles.statusText, { color: mutedColor }]}>
+                                {Platform.OS === 'web'
+                                    ? 'Vista previa web: carga archivos de audio locales para probar la app aquí.'
+                                    : 'No se encontraron canciones en el dispositivo.'}
+                            </Text>
+                            {Platform.OS === 'web' && (
+                                <TouchableOpacity
+                                    style={styles.retryButton}
+                                    onPress={async () => {
+                                        const added = await pickWebAudioFiles();
+                                        if (added > 0) await onWebFilesAdded();
+                                    }}
+                                >
+                                    <Text style={styles.retryText}>Cargar audios locales</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    }
+                />
+                <AlphabetIndex
+                    visible={['title_asc', 'title_desc', 'artist_asc', 'artist_desc'].includes(sortBy)}
+                    onSelectLetter={handleSelectLetter}
+                />
+            </View>
+        );
+    }
+);
 
 export const SongsScreen: React.FC = () => {
     const { width: screenWidth } = useWindowDimensions();
@@ -74,14 +220,43 @@ export const SongsScreen: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
 
-    const toggleSelect = (id: string) =>
-        setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    const tracksRef = useRef<Track[]>(tracks);
+    tracksRef.current = tracks;
+    const selectedIdsRef = useRef<string[]>(selectedIds);
+    selectedIdsRef.current = selectedIds;
 
-    const listRef = useRef<FlatList<Track>>(null);
     const pagerRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
     const tabsScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
     const scrollX = useRef(new Animated.Value(0)).current;
     const [tabLayouts, setTabLayouts] = useState<Record<number, { x: number; width: number }>>({});
+
+    const toggleSelect = useCallback((id: string) => {
+        setSelectedIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+    }, []);
+
+    const clearSelection = useCallback(() => {
+        setSelectedIds((prev) => (prev.length === 0 ? prev : []));
+    }, []);
+
+    const toggleSelectAll = useCallback(() => {
+        setSelectedIds((prev) =>
+            prev.length >= tracksRef.current.length ? [] : tracksRef.current.map((t) => t.id)
+        );
+    }, []);
+
+    const openPlayer = useCallback(() => setPlayerOpen(true), []);
+    const closePlayer = useCallback(() => setPlayerOpen(false), []);
+    const bumpLibraryVersion = useCallback(() => setLibraryVersion((v) => v + 1), []);
+
+    const handlePlayFromSongs = useCallback(
+        (selected: Track) => {
+            playTrack(selected, tracksRef.current);
+            setPlayerOpen(true);
+        },
+        [playTrack]
+    );
 
     // Sale del modo selección al pulsar el botón físico Atrás en Android
     useEffect(() => {
@@ -100,11 +275,11 @@ export const SongsScreen: React.FC = () => {
         setLibraryVersion((v) => v + 1);
     }, [sortBy]);
 
-    // Enriquecimiento progresivo en segundo plano de carátulas y etiquetas ID3
+    // Enriquecimiento progresivo con pausas cortas para no saturar SQLite ni el hilo JS en 1300+ pistas
     const enrichMetadataInBackground = useCallback(async (list: Track[]) => {
         const pending = list.filter((t) => !t.artworkUri && t.artist === 'Artista desconocido');
-        for (let i = 0; i < pending.length; i += 5) {
-            const batch = pending.slice(i, i + 5);
+        for (let i = 0; i < pending.length; i += 12) {
+            const batch = pending.slice(i, i + 12);
             const updates = await Promise.all(
                 batch.map(async (track) => {
                     try {
@@ -130,6 +305,8 @@ export const SongsScreen: React.FC = () => {
             if (validMap.size > 0) {
                 setTracks((prev) => prev.map((item) => validMap.get(item.id) ?? item));
             }
+            // Cede el hilo entre lotes para mantener 60fps durante navegación
+            await new Promise((r) => setTimeout(r, 80));
         }
     }, []);
 
@@ -177,58 +354,90 @@ export const SongsScreen: React.FC = () => {
         [tabLayouts, screenWidth]
     );
 
-    // Cambia de sección deslizando suavemente el pager horizontal
+    // Cambia de sección disparando primero el scroll nativo sin bloquear el hilo JS
     const goToTab = useCallback(
         (index: number) => {
-            setSelectedIds([]);
-            setActiveIndex(index);
-            setVisitedTabs((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+            if (index === activeIndex) return;
             pagerRef.current?.scrollTo({ x: index * screenWidth, animated: true });
             syncTabBarScroll(index);
+
+            // En web scrollTo animado no siempre dispara eventos intermedios de scroll
+            if (Platform.OS === 'web') {
+                Animated.timing(scrollX, {
+                    toValue: index * screenWidth,
+                    duration: 240,
+                    useNativeDriver: true,
+                }).start();
+            }
+
+            if (selectedIdsRef.current.length > 0) {
+                setSelectedIds([]);
+            }
+            setActiveIndex(index);
+            // Monta pestañas no visitadas en el siguiente frame para que el scroll nativo arranque sin trabas
+            requestAnimationFrame(() => {
+                setVisitedTabs((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+            });
         },
-        [screenWidth, syncTabBarScroll]
+        [activeIndex, screenWidth, syncTabBarScroll, scrollX]
     );
 
     // Sincroniza pestaña activa al terminar el gesto de swipe horizontal
-    const handlePagerMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const nextIdx = Math.round(e.nativeEvent.contentOffset.x / Math.max(1, screenWidth));
-        if (nextIdx >= 0 && nextIdx < TABS.length && nextIdx !== activeIndex) {
-            setSelectedIds([]);
-            setActiveIndex(nextIdx);
-            setVisitedTabs((prev) => (prev[nextIdx] ? prev : { ...prev, [nextIdx]: true }));
-            syncTabBarScroll(nextIdx);
-        }
-    };
+    const handlePagerMomentumEnd = useCallback(
+        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const nextIdx = Math.round(e.nativeEvent.contentOffset.x / Math.max(1, screenWidth));
+            if (nextIdx >= 0 && nextIdx < TABS.length && nextIdx !== activeIndex) {
+                if (selectedIdsRef.current.length > 0) {
+                    setSelectedIds([]);
+                }
+                setActiveIndex(nextIdx);
+                setVisitedTabs((prev) => (prev[nextIdx] ? prev : { ...prev, [nextIdx]: true }));
+                syncTabBarScroll(nextIdx);
+            }
+        },
+        [screenWidth, activeIndex, syncTabBarScroll]
+    );
 
-    // Monta preventivamente la pestaña vecina mientras el usuario desliza con el dedo
-    const handlePagerScrollBegin = () => {
+    // Monta preventivamente las pestañas vecinas al iniciar un deslizamiento
+    const handlePagerScrollBegin = useCallback(() => {
         setVisitedTabs((prev) => {
-            const next = { ...prev };
-            if (activeIndex > 0) next[activeIndex - 1] = true;
-            if (activeIndex < TABS.length - 1) next[activeIndex + 1] = true;
-            return next;
+            const left = activeIndex > 0 ? activeIndex - 1 : activeIndex;
+            const right = activeIndex < TABS.length - 1 ? activeIndex + 1 : activeIndex;
+            if (prev[left] && prev[right]) return prev;
+            return { ...prev, [left]: true, [right]: true };
         });
-    };
+    }, [activeIndex]);
 
-    const selectedTracks = tracks.filter((t) => selectedIds.includes(t.id));
+    const handleAddToQueueSelected = useCallback(() => {
+        const idSet = new Set(selectedIdsRef.current);
+        const picked = tracksRef.current.filter((t) => idSet.has(t.id));
+        if (picked.length === 0) return;
+        addToQueue(picked);
+        setSelectedIds([]);
+        Alert.alert('Cola actualizada', `Se agregaron ${picked.length} canciones a la cola.`);
+    }, [addToQueue]);
 
-    const handleShareSelected = async () => {
-        if (selectedTracks.length === 0) return;
+    const handleOpenPlaylistModal = useCallback(() => setPlaylistModalOpen(true), []);
+
+    const handleShareSelected = useCallback(async () => {
+        const idSet = new Set(selectedIdsRef.current);
+        const picked = tracksRef.current.filter((t) => idSet.has(t.id));
+        if (picked.length === 0) return;
         if (!(await Sharing.isAvailableAsync())) {
             Alert.alert('Compartir', 'No disponible en este dispositivo.');
             return;
         }
         // expo-sharing comparte un archivo a la vez en Android
-        if (selectedTracks.length > 1) {
+        if (picked.length > 1) {
             Alert.alert(
                 'Compartir',
-                `Android permite compartir 1 archivo por vez. Se compartirá "${selectedTracks[0].title}".`,
+                `Android permite compartir 1 archivo por vez. Se compartirá "${picked[0].title}".`,
                 [
                     { text: 'Cancelar', style: 'cancel' },
                     {
                         text: 'Compartir',
                         onPress: async () => {
-                            const uri = selectedTracks[0].uri;
+                            const uri = picked[0].uri;
                             setSelectedIds([]);
                             await Sharing.shareAsync(uri);
                         },
@@ -237,14 +446,14 @@ export const SongsScreen: React.FC = () => {
             );
             return;
         }
-        const uri = selectedTracks[0].uri;
+        const uri = picked[0].uri;
         setSelectedIds([]);
         await Sharing.shareAsync(uri);
-    };
+    }, []);
 
-    const handleDeleteSelected = () => {
-        if (selectedIds.length === 0) return;
-        const idsToDelete = [...selectedIds];
+    const handleDeleteSelected = useCallback(() => {
+        const idsToDelete = [...selectedIdsRef.current];
+        if (idsToDelete.length === 0) return;
         Alert.alert(
             'Mover a papelera',
             `¿Mover ${idsToDelete.length} ${idsToDelete.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
@@ -254,7 +463,7 @@ export const SongsScreen: React.FC = () => {
                     text: 'Mover a papelera',
                     style: 'destructive',
                     onPress: () => {
-                        // Desactiva el selector y quita las pistas de la UI al instante (sin esperar bloqueos SQLite)
+                        // Desactiva el selector y quita las pistas de la UI al instante
                         const idSet = new Set(idsToDelete);
                         setSelectedIds([]);
                         setTracks((prev) => prev.filter((t) => !idSet.has(t.id)));
@@ -265,25 +474,42 @@ export const SongsScreen: React.FC = () => {
                 },
             ]
         );
-    };
+    }, []);
 
-    // Interpolaciones de la barra blanca deslizante debajo de las pestañas
-    const allTabsMeasured = TABS.every((_, idx) => Boolean(tabLayouts[idx]));
-    const inputRange = TABS.map((_, idx) => idx * Math.max(1, screenWidth));
-    const indicatorTranslateX = allTabsMeasured
-        ? scrollX.interpolate({
-              inputRange,
-              outputRange: TABS.map((_, idx) => tabLayouts[idx].x),
-              extrapolate: 'clamp',
-          })
-        : null;
-    const indicatorWidth = allTabsMeasured
-        ? scrollX.interpolate({
-              inputRange,
-              outputRange: TABS.map((_, idx) => tabLayouts[idx].width),
-              extrapolate: 'clamp',
-          })
-        : null;
+    // Evento de scroll 100% en hilo nativo UI para la barra blanca deslizante
+    const onPagerScroll = useMemo(
+        () =>
+            Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+                useNativeDriver: true,
+            }),
+        [scrollX]
+    );
+
+    // Barra blanca deslizante acelerada por GPU (translateX + scaleX con useNativeDriver: true)
+    const indicatorStyle = useMemo(() => {
+        const allMeasured = TABS.every((_, idx) => Boolean(tabLayouts[idx]));
+        if (!allMeasured) return null;
+
+        const inputRange = TABS.map((_, idx) => idx * Math.max(1, screenWidth));
+        const translateX = scrollX.interpolate({
+            inputRange,
+            outputRange: TABS.map(
+                (_, idx) => tabLayouts[idx].x + tabLayouts[idx].width / 2 - INDICATOR_BASE_WIDTH / 2
+            ),
+            extrapolate: 'clamp',
+        });
+        const scaleX = scrollX.interpolate({
+            inputRange,
+            outputRange: TABS.map((_, idx) => Math.max(0.1, tabLayouts[idx].width / INDICATOR_BASE_WIDTH)),
+            extrapolate: 'clamp',
+        });
+
+        return {
+            backgroundColor: fgColor,
+            width: INDICATOR_BASE_WIDTH,
+            transform: [{ translateX }, { scaleX }],
+        };
+    }, [tabLayouts, screenWidth, scrollX, fgColor]);
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -309,7 +535,7 @@ export const SongsScreen: React.FC = () => {
                 </View>
             </View>
 
-            {/* Segunda fila del Header: 6 pestañas con indicador blanco deslizante */}
+            {/* Segunda fila del Header: 6 pestañas con indicador blanco deslizante en GPU */}
             <View style={styles.tabsWrapper}>
                 <ScrollView
                     ref={tabsScrollRef}
@@ -346,18 +572,10 @@ export const SongsScreen: React.FC = () => {
                             );
                         })}
 
-                        {/* Barra blanca deslizante debajo de la pestaña activa */}
-                        {indicatorTranslateX && indicatorWidth && (
+                        {indicatorStyle && (
                             <Animated.View
                                 pointerEvents="none"
-                                style={[
-                                    styles.tabIndicator,
-                                    {
-                                        backgroundColor: fgColor,
-                                        width: indicatorWidth,
-                                        transform: [{ translateX: indicatorTranslateX }],
-                                    },
-                                ]}
+                                style={[styles.tabIndicator, indicatorStyle]}
                             />
                         )}
                     </View>
@@ -389,101 +607,32 @@ export const SongsScreen: React.FC = () => {
                     scrollEventThrottle={16}
                     onScrollBeginDrag={handlePagerScrollBegin}
                     onMomentumScrollEnd={handlePagerMomentumEnd}
-                    onScroll={Animated.event(
-                        [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-                        { useNativeDriver: false }
-                    )}
+                    onScroll={onPagerScroll}
                     style={{ flex: 1 }}
                 >
                     {/* Página 0: Canciones */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        <SelectionActionBar
-                            selectedCount={selectedIds.length}
-                            totalCount={tracks.length}
-                            onClear={() => setSelectedIds([])}
-                            onToggleSelectAll={() =>
-                                setSelectedIds(
-                                    selectedIds.length >= tracks.length ? [] : tracks.map((t) => t.id)
-                                )
-                            }
-                            onAddToQueue={() => {
-                                addToQueue(selectedTracks);
-                                setSelectedIds([]);
-                                Alert.alert(
-                                    'Cola actualizada',
-                                    `Se agregaron ${selectedTracks.length} canciones a la cola.`
-                                );
-                            }}
-                            onAddToPlaylist={() => setPlaylistModalOpen(true)}
-                            onShare={handleShareSelected}
-                            onDelete={handleDeleteSelected}
-                        />
-
-                        <FlatList
-                            ref={listRef}
-                            data={tracks}
-                            keyExtractor={(item) => item.id}
-                            extraData={selectedIds}
-                            initialNumToRender={15}
-                            maxToRenderPerBatch={10}
-                            windowSize={5}
-                            renderItem={({ item }) => (
-                                <SongCard
-                                    track={item}
-                                    selected={selectedIds.includes(item.id)}
-                                    onPress={(selected) => {
-                                        if (selectedIds.length > 0) {
-                                            toggleSelect(selected.id);
-                                        } else {
-                                            playTrack(selected, tracks);
-                                            setPlayerOpen(true);
-                                        }
-                                    }}
-                                    onLongPress={(selected) => toggleSelect(selected.id)}
-                                    onArtworkPress={(selected) => toggleSelect(selected.id)}
-                                />
-                            )}
-                            ListEmptyComponent={
-                                <View style={styles.centered}>
-                                    <Text style={[styles.statusText, { color: mutedColor }]}>
-                                        {Platform.OS === 'web'
-                                            ? 'Vista previa web: carga archivos de audio locales para probar la app aquí.'
-                                            : 'No se encontraron canciones en el dispositivo.'}
-                                    </Text>
-                                    {Platform.OS === 'web' && (
-                                        <TouchableOpacity
-                                            style={styles.retryButton}
-                                            onPress={async () => {
-                                                const added = await pickWebAudioFiles();
-                                                if (added > 0) await refreshTracks();
-                                            }}
-                                        >
-                                            <Text style={styles.retryText}>Cargar audios locales</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                            }
-                        />
-                        <AlphabetIndex
-                            visible={['title_asc', 'title_desc', 'artist_asc', 'artist_desc'].includes(sortBy)}
-                            onSelectLetter={(letter) => {
-                                const idx = tracks.findIndex((t) =>
-                                    (sortBy.startsWith('artist') ? t.artist : t.title)
-                                        .toUpperCase()
-                                        .startsWith(letter)
-                                );
-                                if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true });
-                            }}
+                        <SongsListPane
+                            tracks={tracks}
+                            sortBy={sortBy}
+                            selectedIds={selectedIds}
+                            mutedColor={mutedColor}
+                            onToggleSelect={toggleSelect}
+                            onClearSelect={clearSelection}
+                            onToggleSelectAll={toggleSelectAll}
+                            onPlayTrack={handlePlayFromSongs}
+                            onAddToQueue={handleAddToQueueSelected}
+                            onOpenPlaylistModal={handleOpenPlaylistModal}
+                            onShareSelected={handleShareSelected}
+                            onDeleteSelected={handleDeleteSelected}
+                            onWebFilesAdded={refreshTracks}
                         />
                     </View>
 
                     {/* Página 1: Playlists */}
                     <View style={{ width: screenWidth, flex: 1 }}>
                         {visitedTabs[1] && (
-                            <PlaylistsTab
-                                onOpenPlayer={() => setPlayerOpen(true)}
-                                refreshKey={libraryVersion}
-                            />
+                            <PlaylistsTab onOpenPlayer={openPlayer} refreshKey={libraryVersion} />
                         )}
                     </View>
 
@@ -491,7 +640,8 @@ export const SongsScreen: React.FC = () => {
                     <View style={{ width: screenWidth, flex: 1 }}>
                         {visitedTabs[2] && (
                             <FoldersTab
-                                onOpenPlayer={() => setPlayerOpen(true)}
+                                tracks={tracks}
+                                onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
                                 refreshKey={libraryVersion}
                             />
@@ -502,9 +652,9 @@ export const SongsScreen: React.FC = () => {
                     <View style={{ width: screenWidth, flex: 1 }}>
                         {visitedTabs[3] && (
                             <ArtistsTab
-                                onOpenPlayer={() => setPlayerOpen(true)}
+                                tracks={tracks}
+                                onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
-                                refreshKey={libraryVersion}
                             />
                         )}
                     </View>
@@ -513,9 +663,9 @@ export const SongsScreen: React.FC = () => {
                     <View style={{ width: screenWidth, flex: 1 }}>
                         {visitedTabs[4] && (
                             <AlbumsTab
-                                onOpenPlayer={() => setPlayerOpen(true)}
+                                tracks={tracks}
+                                onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
-                                refreshKey={libraryVersion}
                             />
                         )}
                     </View>
@@ -533,7 +683,7 @@ export const SongsScreen: React.FC = () => {
                 onClose={() => setPlaylistModalOpen(false)}
                 onAdded={() => {
                     setSelectedIds([]);
-                    setLibraryVersion((v) => v + 1);
+                    bumpLibraryVersion();
                 }}
             />
             <SortModal
@@ -546,10 +696,7 @@ export const SongsScreen: React.FC = () => {
                 visible={searchOpen}
                 tracks={tracks}
                 onClose={() => setSearchOpen(false)}
-                onSelectTrack={(selected) => {
-                    playTrack(selected, tracks);
-                    setPlayerOpen(true);
-                }}
+                onSelectTrack={handlePlayFromSongs}
             />
             <SettingsModal
                 visible={settingsOpen}
@@ -558,14 +705,12 @@ export const SongsScreen: React.FC = () => {
                     refreshTracks();
                 }}
             />
-            <MiniPlayer onExpand={() => setPlayerOpen(true)} />
+            <MiniPlayer onExpand={openPlayer} />
             <FullPlayerModal
                 visible={playerOpen}
-                onClose={() => {
-                    setPlayerOpen(false);
-                    refreshTracks();
-                }}
-                onPlaylistUpdated={() => setLibraryVersion((v) => v + 1)}
+                onClose={closePlayer}
+                onPlaylistUpdated={bumpLibraryVersion}
+                onTrackMutated={refreshTracks}
             />
         </SafeAreaView>
     );

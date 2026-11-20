@@ -161,12 +161,14 @@ export const SongCard: React.FC<SongCardProps> = React.memo(
     }
 );
 
+export const SONG_CARD_HEIGHT = 68;
+
 const styles = StyleSheet.create({
     container: {
+        height: SONG_CARD_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingVertical: 10,
     },
     artworkBox: {
         width: 48,
