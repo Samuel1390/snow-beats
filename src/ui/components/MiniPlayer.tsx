@@ -22,60 +22,52 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
         repeatMode === 'repeat_one' ? Repeat1 : repeatMode === 'shuffle' ? Shuffle : Repeat;
 
     return (
-        <TouchableOpacity
-            style={[styles.wrapper, { backgroundColor: palette.background }]}
-            activeOpacity={0.9}
-            onPress={onExpand}
-        >
-            return (
-            <View style={[styles.wrapper, { backgroundColor: palette.background }]}>
-                {/* Barra de progreso interactiva en el borde superior */}
-                <Slider
-                    style={styles.topSlider}
-                    minimumValue={0}
-                    maximumValue={Math.max(1, duration)}
-                    value={position}
-                    onSlidingComplete={seekTo}
-                    minimumTrackTintColor={palette.foreground}
-                    maximumTrackTintColor="rgba(255,255,255,0.22)"
-                    thumbTintColor={palette.foreground}
-                />
+        <View style={[styles.wrapper, { backgroundColor: palette.background }]}>
+            {/* Barra de progreso interactiva en el borde superior */}
+            <Slider
+                style={styles.topSlider}
+                minimumValue={0}
+                maximumValue={Math.max(1, duration)}
+                value={position}
+                onSlidingComplete={seekTo}
+                minimumTrackTintColor={palette.foreground}
+                maximumTrackTintColor="rgba(255,255,255,0.22)"
+                thumbTintColor={palette.foreground}
+            />
 
-                <TouchableOpacity style={styles.row} activeOpacity={0.9} onPress={onExpand}>
-                    <View style={styles.artBox}>
-                        {currentTrack.artworkUri ? (
-                            <Image source={{ uri: currentTrack.artworkUri }} style={styles.art} />
-                        ) : (
-                            <Music size={20} color="#9CA3AF" />
-                        )}
-                    </View>
+            <TouchableOpacity style={styles.row} activeOpacity={0.9} onPress={onExpand}>
+                <View style={styles.artBox}>
+                    {currentTrack.artworkUri ? (
+                        <Image source={{ uri: currentTrack.artworkUri }} style={styles.art} />
+                    ) : (
+                        <Music size={20} color="#9CA3AF" />
+                    )}
+                </View>
 
-                    <View style={styles.info}>
-                        <Text style={[styles.title, { color: palette.foreground }]} numberOfLines={1}>
-                            {currentTrack.title}
-                        </Text>
-                        <Text style={[styles.artist, { color: palette.muted }]} numberOfLines={1}>
-                            {currentTrack.artist}
-                        </Text>
-                    </View>
+                <View style={styles.info}>
+                    <Text style={[styles.title, { color: palette.foreground }]} numberOfLines={1}>
+                        {currentTrack.title}
+                    </Text>
+                    <Text style={[styles.artist, { color: palette.muted }]} numberOfLines={1}>
+                        {currentTrack.artist}
+                    </Text>
+                </View>
 
-                    <TouchableOpacity style={styles.btn} onPress={togglePlayPause}>
-                        {isPlaying ? (
-                            <Pause size={22} color={palette.foreground} />
-                        ) : (
-                            <Play size={22} color={palette.foreground} />
-                        )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.btn} onPress={cycleRepeatMode}>
-                        <RepeatIcon size={20} color={palette.foreground} />
-                    </TouchableOpacity>
+                <TouchableOpacity style={styles.btn} onPress={togglePlayPause}>
+                    {isPlaying ? (
+                        <Pause size={22} color={palette.foreground} />
+                    ) : (
+                        <Play size={22} color={palette.foreground} />
+                    )}
                 </TouchableOpacity>
-            </View>
-            );
-        </TouchableOpacity>
+
+                <TouchableOpacity style={styles.btn} onPress={cycleRepeatMode}>
+                    <RepeatIcon size={20} color={palette.foreground} />
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </View>
     );
-};
+}
 
 const styles = StyleSheet.create({
     wrapper: {

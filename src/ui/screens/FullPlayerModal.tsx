@@ -159,6 +159,18 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
                         <Text style={[styles.timeText, { color: palette.muted }]}>{formatTime(duration)}</Text>
                     </View>
                 </View>
+                {/* Controles centrales */}
+                <View style={styles.controlsRow}>
+                    <TouchableOpacity onPress={playPrevious} style={styles.ctrlBtn}>
+                        <SkipBack size={32} color={palette.foreground} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={togglePlayPause} style={styles.playBtn}>
+                        {isPlaying ? <Pause size={34} color="#000000" /> : <Play size={34} color="#000000" />}
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={playNext} style={styles.ctrlBtn}>
+                        <SkipForward size={32} color={palette.foreground} />
+                    </TouchableOpacity>
+                </View>
 
                 {/* Footer inferior */}
                 <View style={styles.footerRow}>
@@ -224,30 +236,40 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
                 <Modal visible={speedOpen} transparent animationType="fade" onRequestClose={() => setSpeedOpen(false)}>
                     <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setSpeedOpen(false)}>
                         <View style={styles.sheet}>
-                            <Text style={styles.sheetTitle}>Velocidad (tono preservado por defecto)</Text>
-                            <View style={styles.chipRow}>
-                                {SPEED_STEPS.map((step) => (
-                                    <TouchableOpacity
-                                        key={`spd-${step}`}
-                                        style={[styles.chip, playbackRate === step && styles.chipActive]}
-                                        onPress={() => setSpeed(step)}
-                                    >
-                                        <Text style={styles.chipText}>{step}x</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                            <Text style={[styles.sheetTitle, { marginTop: 16 }]}>Tono (Pitch)</Text>
-                            <View style={styles.chipRow}>
-                                {SPEED_STEPS.map((step) => (
-                                    <TouchableOpacity
-                                        key={`ptc-${step}`}
-                                        style={[styles.chip, pitch === step && styles.chipActive]}
-                                        onPress={() => setPitchValue(step)}
-                                    >
-                                        <Text style={styles.chipText}>{step}x</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
+                            <Text style={styles.sheetTitle}>
+                                Velocidad: {playbackRate.toFixed(1)}x (tono preservado)
+                            </Text>
+                            <Slider
+                                minimumValue={0.5}
+                                maximumValue={2.0}
+                                step={0.1}
+                                value={playbackRate}
+                                onValueChange={(v) => setSpeed(Math.round(v * 10) / 10)}
+                                minimumTrackTintColor="#FFFFFF"
+                                maximumTrackTintColor="#374151"
+                                thumbTintColor="#FFFFFF"
+                            />
+
+                            <Text style={[styles.sheetTitle, { marginTop: 16 }]}>
+                                Tono (Pitch): {pitch.toFixed(1)}x
+                            </Text>
+                            <Slider
+                                minimumValue={0.5}
+                                maximumValue={2.0}
+                                step={0.1}
+                                value={pitch}
+                                onValueChange={(v) => setPitchValue(Math.round(v * 10) / 10)}
+                                minimumTrackTintColor="#FFFFFF"
+                                maximumTrackTintColor="#374151"
+                                thumbTintColor="#FFFFFF"
+                            />
+
+                            <TouchableOpacity
+                                style={{ alignSelf: 'flex-end', marginTop: 12, padding: 8 }}
+                                onPress={() => { setSpeed(1); setPitchValue(1); }}
+                            >
+                                <Text style={{ color: '#38BDF8', fontWeight: '700' }}>Restablecer (1.0x)</Text>
+                            </TouchableOpacity>
                         </View>
                     </TouchableOpacity>
                 </Modal>

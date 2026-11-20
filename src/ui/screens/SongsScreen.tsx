@@ -42,35 +42,6 @@ const TABS: { key: MainTab; label: string }[] = [
     { key: 'videos', label: 'Videos' },
 ];
 
-// Enriquecimiento progresivo en segundo plano de carátulas y etiquetas ID3
-const enrichMetadataInBackground = useCallback(async (list: Track[]) => {
-    const pending = list.filter((t) => !t.artworkUri && t.artist === 'Artista desconocido');
-    for (let i = 0; i < pending.length; i += 5) {
-        const batch = pending.slice(i, i + 5);
-        const updates = await Promise.all(
-            batch.map(async (track) => {
-                const tags = await readTrackTags(track.uri, track.id);
-                if (!tags) return null;
-                const updated: Track = {
-                    ...track,
-                    title: tags.title || track.title,
-                    artist: tags.artist || track.artist,
-                    album: tags.album || track.album,
-                    artworkUri: tags.artworkUri ?? null,
-                    dominantColor: tags.dominantColor ?? null,
-                };
-                await updateTrackMetadata(track.id, updated);
-                return updated;
-            })
-        );
-
-        const validMap = new Map(updates.filter(Boolean).map((u) => [u!.id, u!]));
-        if (validMap.size > 0) {
-            setTracks((prev) => prev.map((item) => validMap.get(item.id) ?? item));
-        }
-    }
-}, []);
-
 export const SongsScreen: React.FC = () => {
     const [activeTab, setActiveTab] = useState<MainTab>('songs');
     const [tracks, setTracks] = useState<Track[]>([]);
@@ -88,7 +59,39 @@ export const SongsScreen: React.FC = () => {
     const { playTrack } = usePlayer();
     const [playerOpen, setPlayerOpen] = useState(false);
 
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const toggleSelect = (id: string) =>
+        setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
     const listRef = useRef<FlatList<Track>>(null);
+    // Enriquecimiento progresivo en segundo plano de carátulas y etiquetas ID3
+    const enrichMetadataInBackground = useCallback(async (list: Track[]) => {
+        const pending = list.filter((t) => !t.artworkUri && t.artist === 'Artista desconocido');
+        for (let i = 0; i < pending.length; i += 5) {
+            const batch = pending.slice(i, i + 5);
+            const updates = await Promise.all(
+                batch.map(async (track) => {
+                    const tags = await readTrackTags(track.uri, track.id);
+                    if (!tags) return null;
+                    const updated: Track = {
+                        ...track,
+                        title: tags.title || track.title,
+                        artist: tags.artist || track.artist,
+                        album: tags.album || track.album,
+                        artworkUri: tags.artworkUri ?? null,
+                        dominantColor: tags.dominantColor ?? null,
+                    };
+                    await updateTrackMetadata(track.id, updated);
+                    return updated;
+                })
+            );
+
+            const validMap = new Map(updates.filter(Boolean).map((u) => [u!.id, u!]));
+            if (validMap.size > 0) {
+                setTracks((prev) => prev.map((item) => validMap.get(item.id) ?? item));
+            }
+        }
+    }, []);
 
     const loadLibrary = useCallback(async (currentSort: SortOption, fromUserAction = false) => {
         setLoading(true);
@@ -207,8 +210,12 @@ export const SongsScreen: React.FC = () => {
                         removeClippedSubviews
                         renderItem={({ item }) => (
                             <SongCard track={item} onPress={(selected) => {
-                                playTrack(selected, tracks);
-                                setPlayerOpen(true);
+                                if (selectedIds.length > 0) {
+                                    toggleSelect(selected.id);
+                                } else {
+                                    playTrack(selected, tracks);
+                                    setPlayerOpen(true);
+                                }
                             }} />
                         )}
                     />

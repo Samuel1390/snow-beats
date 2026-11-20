@@ -7,6 +7,9 @@ interface SongCardProps {
     track: Track;
     onPress: (track: Track) => void;
     highlightQuery?: string
+    selected?: boolean
+    onLongPress?: (track: Track) => void
+    onArtworkPress?: (track: Track) => void
 }
 
 function HighlightedText({ text, query, style }: { text: string; query?: string; style: any }) {
@@ -28,9 +31,9 @@ function HighlightedText({ text, query, style }: { text: string; query?: string;
     );
 }
 
-export const SongCard: React.FC<SongCardProps> = React.memo(({ track, onPress, highlightQuery }) => {
+export const SongCard: React.FC<SongCardProps> = React.memo(({ track, onPress, highlightQuery, onLongPress }) => {
     return (
-        <TouchableOpacity style={styles.container} onPress={() => onPress(track)} activeOpacity={0.7} >
+        <TouchableOpacity style={styles.container} onPress={() => onPress(track)} activeOpacity={0.7} onLongPress={() => onLongPress?.(track)} >
             {/* Carátula o ícono gris por defecto */}
             < View style={styles.artworkBox} >
                 {

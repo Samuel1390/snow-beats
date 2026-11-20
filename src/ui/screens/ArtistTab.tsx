@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, View, Text, StyleSheet } from 'react-native';
-import { Mic2 } from 'lucide-react-native';
+import { CollageArtwork } from '../components/CollageArtWork';
 import { getArtistsSummary } from '../../storage/database/db';
 import { useTheme } from '../../theme/ThemeContext';
 
 export const ArtistsTab: React.FC = () => {
     const { fgColor, mutedColor } = useTheme();
-    const [artists, setArtists] = useState<{ name: string; trackCount: number }[]>([]);
+    const [artists, setArtists] = useState<
+        { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
+    >([]);
 
     useEffect(() => { getArtistsSummary().then(setArtists); }, []);
 
@@ -17,7 +19,7 @@ export const ArtistsTab: React.FC = () => {
             contentContainerStyle={{ padding: 16 }}
             renderItem={({ item }) => (
                 <View style={styles.row}>
-                    <Mic2 size={20} color={fgColor} />
+                    <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
                     <View style={{ marginLeft: 12 }}>
                         <Text style={[styles.name, { color: fgColor }]}>{item.name}</Text>
                         <Text style={{ color: mutedColor, fontSize: 12 }}>{item.trackCount} canciones</Text>

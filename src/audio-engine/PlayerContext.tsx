@@ -32,6 +32,7 @@ interface PlayerContextValue {
     toggleFavorite: () => Promise<void>;
     hideCurrentTrack: () => Promise<void>;
     deleteCurrentTrack: () => Promise<void>;
+    addToQueue: (tracks: Track[]) => void
 
 }
 interface ProgressValue {
@@ -58,6 +59,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [repeatMode, setRepeatMode] = useState<RepeatMode>('repeat_all');
     const [playbackRate, setPlaybackRate] = useState<number>(1);
     const [pitch, setPitch] = useState<number>(1);
+    const addToQueue = (items: Track[]) => setQueue((prev) => [...prev, ...items]);
 
     // Configura audio en segundo plano al iniciar
     useEffect(() => {
@@ -249,6 +251,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 toggleFavorite,
                 hideCurrentTrack,
                 deleteCurrentTrack,
+                addToQueue,
             }}
         >
             <PlayerProgressContext.Provider value={{ position, duration }}>

@@ -345,37 +345,65 @@ export async function addTrackToPlaylist(playlistId: string, trackId: string): P
   );
 }
 
-// Agrupa canciones por artista
-export async function getArtistsSummary(): Promise<{ name: string; trackCount: number }[]> {
+// Artistas con las 4 portadas más recientes
+export async function getArtistsSummary(): Promise<
+  { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
+> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ artist: string; c: number }>(
     `SELECT artist, COUNT(*) as c FROM tracks WHERE is_hidden = 0 AND is_deleted = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE ASC`
   );
-  return rows.map((r) => ({ name: r.artist, trackCount: r.c }));
+  const result = [];
+  for (const r of rows) {
+    const arts = await db.getAllAsync<{ artwork_uri: string | null }>(
+      `SELECT artwork_uri FROM tracks WHERE artist = ? AND is_hidden = 0 AND is_deleted = 0 ORDER BY creation_time DESC LIMIT 4`,
+      [r.artist]
+    );
+    result.push({ name: r.artist, trackCount: r.c, recentArtworks: arts.map((a) => a.artwork_uri) });
+  }
+  return result;
 }
 
-// Agrupa canciones por álbum
-export async function getAlbumsSummary(): Promise<{ name: string; trackCount: number }[]> {
+// Álbumes con las 4 portadas más recientes
+export async function getAlbumsSummary(): Promise<
+  { name: string; trackCount: number; recentArtworks: (string | null)[] }[]
+> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ album: string; c: number }>(
     `SELECT album, COUNT(*) as c FROM tracks WHERE is_hidden = 0 AND is_deleted = 0 GROUP BY album ORDER BY album COLLATE NOCASE ASC`
   );
-  return rows.map((r) => ({ name: r.album, trackCount: r.c }));
+  const result = [];
+  for (const r of rows) {
+    const arts = await db.getAllAsync<{ artwork_uri: string | null }>(
+      `SELECT artwork_uri FROM tracks WHERE album = ? AND is_hidden = 0 AND is_deleted = 0 ORDER BY creation_time DESC LIMIT 4`,
+      [r.album]
+    );
+    result.push({ name: r.album, trackCount: r.c, recentArtworks: arts.map((a) => a.artwork_uri) });
+  }
+  return result;
 }
-// Guarda metadatos ID3 y color dominante extraídos por Kotlin
-export async function updateTrackMetadata(
-  trackId: string,
-  data: { title?: string; artist?: string; album?: string; artworkUri?: string | null; dominantColor?: string | null }
-): Promise<void> {
+
+// Obtiene las canciones de una playlist manual
+export async function getPlaylistTracks(playlistId: string): Promise<Track[]> {
   const db = await getDatabase();
-  await db.runAsync(
-    `UPDATE tracks SET
-      title = COALESCE(?, title),
-      artist = COALESCE(?, artist),
-      album = COALESCE(?, album),
-      artwork_uri = COALESCE(?, artwork_uri),
-      dominant_color = COALESCE(?, dominant_color)
-     WHERE id = ?`,
-    [data.title ?? null, data.artist ?? null, data.album ?? null, data.artworkUri ?? null, data.dominantColor ?? null, trackId]
+  const rows = await db.getAllAsync<any>(
+    `SELECT t.* FROM tracks t
+     INNER JOIN playlist_tracks pt ON t.id = pt.track_id
+     WHERE pt.playlist_id = ? AND t.is_deleted = 0
+     ORDER BY pt.position ASC`,
+    [playlistId]
   );
+  return rows.map(mapRowToTrack);
+}
+
+// Quita una canción de una playlist manual o elimina la playlist completa
+export async function removeTrackFromPlaylist(playlistId: string, trackId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(`DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`, [playlistId, trackId]);
+}
+
+export async function deletePlaylist(playlistId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(`DELETE FROM playlist_tracks WHERE playlist_id = ?`, [playlistId]);
+  await db.runAsync(`DELETE FROM playlists WHERE id = ?`, [playlistId]);
 }
