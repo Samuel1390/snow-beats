@@ -9,7 +9,7 @@ interface LyricsTickerProps {
     onPress: () => void;
 }
 
-// Carrusel vertical compacto debajo del título: muestra la letra sincronizada en tiempo real
+// Carrusel vertical compacto debajo del título con altura fija para evitar cualquier layout shift
 export const LyricsTicker: React.FC<LyricsTickerProps> = React.memo(({ lyrics, onPress }) => {
     const { position } = usePlayerProgress();
 
@@ -55,19 +55,20 @@ export const LyricsTicker: React.FC<LyricsTickerProps> = React.memo(({ lyrics, o
         <TouchableOpacity style={styles.card} activeOpacity={0.82} onPress={onPress}>
             <View style={styles.textClip}>
                 <Animated.View
-                    style={{
-                        opacity: opacityAnim,
-                        transform: [{ translateY: slideAnim }],
-                    }}
+                    style={[
+                        styles.linesContainer,
+                        {
+                            opacity: opacityAnim,
+                            transform: [{ translateY: slideAnim }],
+                        },
+                    ]}
                 >
-                    <Text style={styles.activeLine} numberOfLines={2}>
+                    <Text style={styles.activeLine} numberOfLines={2} ellipsizeMode="tail">
                         {currentLine}
                     </Text>
-                    {nextLine ? (
-                        <Text style={styles.nextLine} numberOfLines={1}>
-                            {nextLine}
-                        </Text>
-                    ) : null}
+                    <Text style={styles.nextLine} numberOfLines={1} ellipsizeMode="tail">
+                        {nextLine || ' '}
+                    </Text>
                 </Animated.View>
             </View>
             <View style={styles.expandBadge}>
@@ -78,8 +79,10 @@ export const LyricsTicker: React.FC<LyricsTickerProps> = React.memo(({ lyrics, o
 });
 
 const styles = StyleSheet.create({
+    // Altura fija exacta (2 líneas activas = 40px + 1 línea siguiente = 19px + padding 20px + borde 2px)
     card: {
         marginTop: 12,
+        height: 82,
         backgroundColor: 'rgba(0, 0, 0, 0.28)',
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.12)',
@@ -91,8 +94,12 @@ const styles = StyleSheet.create({
     },
     textClip: {
         flex: 1,
+        height: 60,
         overflow: 'hidden',
-        minHeight: 42,
+        justifyContent: 'center',
+    },
+    linesContainer: {
+        height: 60,
         justifyContent: 'center',
     },
     activeLine: {
@@ -100,6 +107,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '800',
         lineHeight: 20,
+        maxHeight: 40,
         textShadowColor: 'rgba(0, 0, 0, 0.35)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 3,
@@ -108,7 +116,9 @@ const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.52)',
         fontSize: 12.5,
         fontWeight: '600',
-        marginTop: 2,
+        lineHeight: 17,
+        height: 17,
+        marginTop: 3,
     },
     expandBadge: {
         width: 28,

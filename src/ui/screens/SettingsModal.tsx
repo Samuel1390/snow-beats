@@ -1,40 +1,53 @@
 import React, { useEffect, useState } from 'react';
 import {
-    Modal,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    Linking,
     Alert,
+    KeyboardAvoidingView,
+    Linking,
+    Modal,
+    Platform,
+    ScrollView,
     StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import Slider from '@react-native-community/slider';
-import { ArrowLeft, Image as ImageIcon, Trash2, Mail } from 'lucide-react-native';
 import {
-    GRADIENT_PRESETS,
-    SOLID_PALETTES,
-    useTheme,
-} from '../../theme/ThemeContext';
-import {
-    emptyTrash,
-    getDeletedTracks,
-    restoreTrack,
-} from '../../storage/database/db';
+    ArrowLeft,
+    BarChart3,
+    Check,
+    ChevronRight,
+    Globe,
+    Info,
+    Mail,
+    Palette,
+    Timer,
+    Trash2,
+} from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../../theme/ThemeContext';
+import { emptyTrash, getDeletedTracks, restoreTrack } from '../../storage/database/db';
 import { Track } from '../../types/music';
+import { ThemeSettingsView } from '../components/ThemeSettingsView';
+
+type SettingsSection =
+    | 'theme'
+    | 'timer'
+    | 'stats'
+    | 'trash'
+    | 'language'
+    | 'report'
+    | 'about';
 
 interface SettingsModalProps {
     visible: boolean;
     onClose: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
-    const { theme, updateTheme } = useTheme();
-    const [customHex, setCustomHex] = useState('#1E1B4B');
-    const [gradTop, setGradTop] = useState('#1E3A8A');
-    const [gradBottom, setGradBottom] = useState('#000000');
+export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible, onClose }) => {
+    const { theme } = useTheme();
+    const insets = useSafeAreaInsets();
+    const [activeSection, setActiveSection] = useState<SettingsSection | null>(null);
     const [language, setLanguage] = useState<'es' | 'en'>('es');
     const [sleepMinutes, setSleepMinutes] = useState<number>(0);
     const [trash, setTrash] = useState<Track[]>([]);
@@ -42,26 +55,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
 
     useEffect(() => {
         if (visible) {
-            getDeletedTracks().then(setTrash);
+            setActiveSection(null);
+            getDeletedTracks()
+                .then(setTrash)
+                .catch(() => { });
         }
     }, [visible]);
 
-    // Selecciona imagen de galería con blur=0 y brightness=100 por defecto
-    const pickGalleryImage = async () => {
-        const res = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            quality: 0.9,
-        });
-        if (!res.canceled && res.assets[0]?.uri) {
-            updateTheme({
-                backgroundType: 'image',
-                customImage: {
-                    uri: res.assets[0].uri,
-                    blur: 0,
-                    brightness: 100,
-                },
-                foregroundColor: '#FFFFFF',
-            });
+    const handleBackAction = () => {
+        if (activeSection !== null) {
+            setActiveSection(null);
+        } else {
+            onClose();
         }
     };
 
@@ -71,329 +76,475 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }
         Linking.openURL(`mailto:snelo1390@gmail.com?subject=${subject}&body=${body}`);
     };
 
+    const themeSubtitle =
+        theme.backgroundType === 'image'
+            ? 'Imagen personalizada'
+            : theme.backgroundType === 'gradient'
+            ? 'Gradiente'
+            : `${theme.mode === 'dark' ? 'Oscuro' : theme.mode === 'light' ? 'Claro' : 'Sistema'} · Color sólido`;
+
+    const menuItems: {
+        key: SettingsSection;
+        title: string;
+        subtitle: string;
+        Icon: React.FC<{ size?: number; color?: string }>;
+        iconBg: string;
+    }[] = [
+        {
+            key: 'theme',
+            title: 'Tema',
+            subtitle: themeSubtitle,
+            Icon: Palette,
+            iconBg: '#1D4ED8',
+        },
+        {
+            key: 'timer',
+            title: 'Temporizador de apagado',
+            subtitle: sleepMinutes === 0 ? 'Desactivado' : `${sleepMinutes} minutos`,
+            Icon: Timer,
+            iconBg: '#6D28D9',
+        },
+        {
+            key: 'stats',
+            title: 'Estadísticas y Alarma',
+            subtitle: 'Tiempo reproducido y alarma musical',
+            Icon: BarChart3,
+            iconBg: '#0F766E',
+        },
+        {
+            key: 'trash',
+            title: 'Eliminados recientemente',
+            subtitle:
+                trash.length === 0
+                    ? 'Papelera vacía'
+                    : `${trash.length} ${trash.length === 1 ? 'canción' : 'canciones'}`,
+            Icon: Trash2,
+            iconBg: '#B91C1C',
+        },
+        {
+            key: 'language',
+            title: 'Idioma',
+            subtitle: language === 'es' ? 'Español' : 'English',
+            Icon: Globe,
+            iconBg: '#0369A1',
+        },
+        {
+            key: 'report',
+            title: 'Reportar problema',
+            subtitle: 'Enviar correo al desarrollador',
+            Icon: Mail,
+            iconBg: '#B45309',
+        },
+        {
+            key: 'about',
+            title: 'Acerca de',
+            subtitle: 'Snow Beats v0.1.0',
+            Icon: Info,
+            iconBg: '#3F3F46',
+        },
+    ];
+
+    const renderSubHeader = (title: string) => (
+        <View style={styles.header}>
+            <TouchableOpacity onPress={() => setActiveSection(null)} style={styles.backBtn}>
+                <ArrowLeft size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{title}</Text>
+        </View>
+    );
+
     return (
-        <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-            <View style={styles.container}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={onClose} style={{ padding: 6 }}>
-                        <ArrowLeft size={22} color="#FFFFFF" />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Configuración</Text>
-                </View>
-
-                <ScrollView contentContainerStyle={styles.content}>
-                    {/* 1. Modo de tema */}
-                    <Text style={styles.section}>Tema</Text>
-                    <View style={styles.rowChips}>
-                        {(['dark', 'light', 'system'] as const).map((m) => (
-                            <TouchableOpacity
-                                key={m}
-                                style={[styles.chip, theme.mode === m && styles.chipActive]}
-                                onPress={() =>
-                                    updateTheme({
-                                        mode: m,
-                                        backgroundType: 'solid',
-                                        solidColor: m === 'light' ? '#FFFFFF' : '#0A0A0A',
-                                    })
-                                }
-                            >
-                                <Text style={styles.chipText}>
-                                    {m === 'dark' ? 'Oscuro' : m === 'light' ? 'Claro' : 'Sistema'}
-                                </Text>
+        <Modal
+            visible={visible}
+            animationType="slide"
+            statusBarTranslucent
+            onRequestClose={handleBackAction}
+        >
+            <View
+                style={[
+                    styles.container,
+                    {
+                        paddingTop: Math.max(insets.top, 26) + 6,
+                        paddingBottom: Math.max(insets.bottom, 10),
+                    },
+                ]}
+            >
+                {/* Pantalla dedicada de Tema */}
+                {activeSection === 'theme' ? (
+                    <ThemeSettingsView onBack={() => setActiveSection(null)} />
+                ) : activeSection === null ? (
+                    /* Menú principal limpio listado por categorías */
+                    <>
+                        <View style={styles.header}>
+                            <TouchableOpacity onPress={onClose} style={styles.backBtn}>
+                                <ArrowLeft size={22} color="#FFFFFF" />
                             </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* 2. Colores planos: Selector personalizado primero + 10 predeterminados */}
-                    <Text style={styles.subSection}>Colores planos</Text>
-                    <View style={styles.customColorRow}>
-                        <TextInput
-                            style={styles.hexInput}
-                            value={customHex}
-                            onChangeText={setCustomHex}
-                            placeholder="#0A0A0A"
-                            placeholderTextColor="#6B7280"
-                        />
-                        <TouchableOpacity
-                            style={styles.applyBtn}
-                            onPress={() =>
-                                updateTheme({ backgroundType: 'solid', solidColor: customHex })
-                            }
-                        >
-                            <Text style={styles.applyBtnText}>Aplicar color</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 8 }}>
-                        {SOLID_PALETTES.map((p) => {
-                            const color = theme.mode === 'light' ? p.lightBg : p.darkBg;
-                            return (
-                                <TouchableOpacity
-                                    key={p.name}
-                                    style={[styles.swatch, { backgroundColor: color }]}
-                                    onPress={() => updateTheme({ backgroundType: 'solid', solidColor: color })}
-                                />
-                            );
-                        })}
-                    </ScrollView>
-
-                    {/* 3. Gradientes */}
-                    <Text style={styles.subSection}>Gradientes</Text>
-                    <View style={styles.customColorRow}>
-                        <TextInput
-                            style={styles.hexInput}
-                            value={gradTop}
-                            onChangeText={setGradTop}
-                            placeholder="Arriba #HEX"
-                            placeholderTextColor="#6B7280"
-                        />
-                        <TextInput
-                            style={styles.hexInput}
-                            value={gradBottom}
-                            onChangeText={setGradBottom}
-                            placeholder="Abajo #HEX"
-                            placeholderTextColor="#6B7280"
-                        />
-                        <TouchableOpacity
-                            style={styles.applyBtn}
-                            onPress={() =>
-                                updateTheme({
-                                    backgroundType: 'gradient',
-                                    gradientColors: [gradTop, gradBottom],
-                                })
-                            }
-                        >
-                            <Text style={styles.applyBtnText}>Aplicar</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <View style={styles.rowChips}>
-                        {GRADIENT_PRESETS.map((g) => (
-                            <TouchableOpacity
-                                key={g.name}
-                                style={styles.chip}
-                                onPress={() =>
-                                    updateTheme({ backgroundType: 'gradient', gradientColors: g.colors })
-                                }
-                            >
-                                <Text style={styles.chipText}>{g.name}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* 4. Imagen de galería como fondo (blur 0, brillo 100% reducible, texto blanco) */}
-                    <Text style={styles.subSection}>Fondo con imagen de galería</Text>
-                    <TouchableOpacity style={styles.galleryBtn} onPress={pickGalleryImage}>
-                        <ImageIcon size={18} color="#000000" />
-                        <Text style={styles.galleryBtnText}>Elegir imagen de la galería</Text>
-                    </TouchableOpacity>
-
-                    {theme.backgroundType === 'image' && theme.customImage && (
-                        <View style={styles.slidersBox}>
-                            <Text style={styles.sliderLabel}>
-                                Desenfoque (Blur): {Math.round(theme.customImage.blur)}
-                            </Text>
-                            <Slider
-                                minimumValue={0}
-                                maximumValue={25}
-                                step={1}
-                                value={theme.customImage.blur}
-                                onValueChange={(val) =>
-                                    updateTheme({
-                                        customImage: { ...theme.customImage!, blur: val },
-                                    })
-                                }
-                                minimumTrackTintColor="#FFFFFF"
-                                maximumTrackTintColor="#374151"
-                            />
-
-                            <Text style={styles.sliderLabel}>
-                                Brillo: {Math.round(theme.customImage.brightness)}% (solo oscurece)
-                            </Text>
-                            <Slider
-                                minimumValue={0}
-                                maximumValue={100}
-                                step={5}
-                                value={theme.customImage.brightness}
-                                onValueChange={(val) =>
-                                    updateTheme({
-                                        customImage: { ...theme.customImage!, brightness: val },
-                                    })
-                                }
-                                minimumTrackTintColor="#FFFFFF"
-                                maximumTrackTintColor="#374151"
-                            />
+                            <Text style={styles.headerTitle}>Configuración</Text>
                         </View>
-                    )}
 
-                    {/* 5. Temporizador de apagado y Estadísticas */}
-                    <Text style={styles.section}>Temporizador de apagado (Sleep Timer)</Text>
-                    <View style={styles.rowChips}>
-                        {[0, 15, 30, 45, 60].map((min) => (
-                            <TouchableOpacity
-                                key={min}
-                                style={[styles.chip, sleepMinutes === min && styles.chipActive]}
-                                onPress={() => setSleepMinutes(min)}
-                            >
-                                <Text style={styles.chipText}>{min === 0 ? 'Desactivado' : `${min} min`}</Text>
+                        <ScrollView
+                            contentContainerStyle={styles.menuListContent}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {menuItems.map(({ key, title, subtitle, Icon, iconBg }) => (
+                                <TouchableOpacity
+                                    key={key}
+                                    style={styles.menuRow}
+                                    activeOpacity={0.75}
+                                    onPress={() => setActiveSection(key)}
+                                >
+                                    <View style={[styles.menuIconWrap, { backgroundColor: iconBg }]}>
+                                        <Icon size={20} color="#FFFFFF" />
+                                    </View>
+                                    <View style={styles.menuTextCol}>
+                                        <Text style={styles.menuTitle}>{title}</Text>
+                                        <Text style={styles.menuSubtitle} numberOfLines={1}>
+                                            {subtitle}
+                                        </Text>
+                                    </View>
+                                    <ChevronRight size={20} color="#71717A" />
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </>
+                ) : activeSection === 'timer' ? (
+                    <>
+                        {renderSubHeader('Temporizador de apagado')}
+                        <ScrollView contentContainerStyle={styles.subContent}>
+                            <Text style={styles.subDescription}>
+                                Detiene la reproducción automáticamente al finalizar el tiempo seleccionado.
+                            </Text>
+                            {[0, 15, 30, 45, 60, 90].map((min) => {
+                                const active = sleepMinutes === min;
+                                return (
+                                    <TouchableOpacity
+                                        key={min}
+                                        style={[styles.optionCard, active && styles.optionCardActive]}
+                                        onPress={() => setSleepMinutes(min)}
+                                    >
+                                        <Text style={styles.optionTitle}>
+                                            {min === 0 ? 'Desactivado' : `${min} minutos`}
+                                        </Text>
+                                        {active && <Check size={20} color="#60A5FA" />}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </>
+                ) : activeSection === 'stats' ? (
+                    <>
+                        {renderSubHeader('Estadísticas y Alarma')}
+                        <ScrollView contentContainerStyle={styles.subContent}>
+                            <View style={styles.infoCard}>
+                                <Text style={styles.infoCardTitle}>Tiempo total reproducido</Text>
+                                <Text style={styles.infoCardBody}>
+                                    0 min — El registro acumulado de escucha se conectará con el motor de estadísticas local.
+                                </Text>
+                            </View>
+                            <View style={styles.infoCard}>
+                                <Text style={styles.infoCardTitle}>Alarma musical</Text>
+                                <Text style={styles.infoCardBody}>
+                                    Módulo nativo de alarma programada planificado para la siguiente fase.
+                                </Text>
+                            </View>
+                        </ScrollView>
+                    </>
+                ) : activeSection === 'trash' ? (
+                    <>
+                        {renderSubHeader(`Eliminados recientemente (${trash.length})`)}
+                        <ScrollView contentContainerStyle={styles.subContent}>
+                            {trash.length > 0 ? (
+                                <TouchableOpacity
+                                    style={styles.dangerBtn}
+                                    onPress={async () => {
+                                        await emptyTrash();
+                                        setTrash([]);
+                                        Alert.alert('Papelera vaciada');
+                                    }}
+                                >
+                                    <Trash2 size={17} color="#FFFFFF" />
+                                    <Text style={styles.dangerBtnText}>Vaciar papelera</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <View style={styles.infoCard}>
+                                    <Text style={styles.infoCardBody}>
+                                        No hay canciones en la papelera interna.
+                                    </Text>
+                                </View>
+                            )}
+
+                            {trash.map((t) => (
+                                <View key={t.id} style={styles.trashRow}>
+                                    <View style={{ flex: 1, marginRight: 12 }}>
+                                        <Text style={styles.trashTitle} numberOfLines={1}>
+                                            {t.title}
+                                        </Text>
+                                        <Text style={styles.trashArtist} numberOfLines={1}>
+                                            {t.artist}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.restorePill}
+                                        onPress={async () => {
+                                            await restoreTrack(t.id);
+                                            setTrash(await getDeletedTracks());
+                                        }}
+                                    >
+                                        <Text style={styles.restoreText}>Restaurar</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </>
+                ) : activeSection === 'language' ? (
+                    <>
+                        {renderSubHeader('Idioma')}
+                        <ScrollView contentContainerStyle={styles.subContent}>
+                            {(
+                                [
+                                    { code: 'es', label: 'Español' },
+                                    { code: 'en', label: 'English' },
+                                ] as const
+                            ).map((lang) => {
+                                const active = language === lang.code;
+                                return (
+                                    <TouchableOpacity
+                                        key={lang.code}
+                                        style={[styles.optionCard, active && styles.optionCardActive]}
+                                        onPress={() => setLanguage(lang.code)}
+                                    >
+                                        <Text style={styles.optionTitle}>{lang.label}</Text>
+                                        {active && <Check size={20} color="#60A5FA" />}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </>
+                ) : activeSection === 'report' ? (
+                    <KeyboardAvoidingView
+                        style={{ flex: 1 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    >
+                        {renderSubHeader('Reportar problema')}
+                        <ScrollView
+                            contentContainerStyle={styles.subContent}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            <Text style={styles.subDescription}>
+                                Cuéntanos qué ocurrió y se abrirá tu app de correo con el reporte listo para enviar.
+                            </Text>
+                            <TextInput
+                                style={styles.reportInput}
+                                placeholder="Describe el problema..."
+                                placeholderTextColor="#71717A"
+                                multiline
+                                value={bugReport}
+                                onChangeText={setBugReport}
+                            />
+                            <TouchableOpacity style={styles.primaryBtn} onPress={sendBugReport}>
+                                <Mail size={18} color="#000000" />
+                                <Text style={styles.primaryBtnText}>Enviar reporte por correo</Text>
                             </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    <Text style={styles.section}>Estadísticas y Alarma musical</Text>
-                    <Text style={styles.infoText}>Tiempo total reproducido: 0 min (activo con motor de audio en el siguiente paso).</Text>
-                    <Text style={styles.infoText}>Alarma musical: módulo nativo planificado para fase final.</Text>
-
-                    {/* 6. Papelera interna */}
-                    <Text style={styles.section}>Eliminados recientemente ({trash.length})</Text>
-                    {trash.length > 0 && (
-                        <TouchableOpacity
-                            style={styles.dangerBtn}
-                            onPress={async () => {
-                                await emptyTrash();
-                                setTrash([]);
-                                Alert.alert('Papelera vaciada');
-                            }}
-                        >
-                            <Trash2 size={16} color="#FFFFFF" />
-                            <Text style={{ color: '#FFFFFF', marginLeft: 6 }}>Vaciar papelera</Text>
-                        </TouchableOpacity>
-                    )}
-                    {trash.map((t) => (
-                        <TouchableOpacity
-                            key={t.id}
-                            style={styles.trashRow}
-                            onPress={async () => {
-                                await restoreTrack(t.id);
-                                setTrash(await getDeletedTracks());
-                            }}
-                        >
-                            <Text style={{ color: '#E5E7EB' }}>{t.title}</Text>
-                            <Text style={{ color: '#60A5FA', fontSize: 12 }}>Restaurar</Text>
-                        </TouchableOpacity>
-                    ))}
-
-                    {/* 7. Idioma */}
-                    <Text style={styles.section}>Idioma</Text>
-                    <View style={styles.rowChips}>
-                        <TouchableOpacity
-                            style={[styles.chip, language === 'es' && styles.chipActive]}
-                            onPress={() => setLanguage('es')}
-                        >
-                            <Text style={styles.chipText}>Español</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.chip, language === 'en' && styles.chipActive]}
-                            onPress={() => setLanguage('en')}
-                        >
-                            <Text style={styles.chipText}>English</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* 8. Reportar problema */}
-                    <Text style={styles.section}>Reportar problema</Text>
-                    <TextInput
-                        style={styles.reportInput}
-                        placeholder="Describe el problema..."
-                        placeholderTextColor="#6B7280"
-                        multiline
-                        value={bugReport}
-                        onChangeText={setBugReport}
-                    />
-                    <TouchableOpacity style={styles.galleryBtn} onPress={sendBugReport}>
-                        <Mail size={18} color="#000000" />
-                        <Text style={styles.galleryBtnText}>Enviar reporte por correo</Text>
-                    </TouchableOpacity>
-
-                    {/* 9. Acerca de */}
-                    <Text style={styles.section}>Acerca de</Text>
-                    <Text style={styles.infoText}>Snow Beats v0.1.0 — Sección lista para completar más adelante.</Text>
-                </ScrollView>
+                        </ScrollView>
+                    </KeyboardAvoidingView>
+                ) : (
+                    <>
+                        {renderSubHeader('Acerca de')}
+                        <ScrollView contentContainerStyle={styles.subContent}>
+                            <View style={styles.infoCard}>
+                                <Text style={styles.infoCardTitle}>Snow Beats</Text>
+                                <Text style={styles.infoCardBody}>
+                                    Versión 0.1.0 · Reproductor de música local diseñado para alto rendimiento,
+                                    privacidad total sin servidor y personalización visual.
+                                </Text>
+                            </View>
+                        </ScrollView>
+                    </>
+                )}
             </View>
         </Modal>
     );
-};
+});
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#0A0A0A', paddingTop: 42 },
+    container: {
+        flex: 1,
+        backgroundColor: '#0C0E14',
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 14,
         paddingBottom: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
-    headerTitle: { color: '#FFFFFF', fontSize: 19, fontWeight: '700', marginLeft: 10 },
-    content: { padding: 16, paddingBottom: 48 },
-    section: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginTop: 20, marginBottom: 8 },
-    subSection: { color: '#9CA3AF', fontSize: 13, fontWeight: '600', marginTop: 12, marginBottom: 6 },
-    rowChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    chip: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
-        backgroundColor: '#1F2937',
+    backBtn: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    chipActive: { backgroundColor: '#2563EB' },
-    chipText: { color: '#FFFFFF', fontSize: 13 },
-    customColorRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-    hexInput: {
-        flex: 1,
-        backgroundColor: '#111827',
+    headerTitle: {
         color: '#FFFFFF',
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderWidth: 1,
-        borderColor: '#374151',
+        fontSize: 19,
+        fontWeight: '700',
+        marginLeft: 6,
     },
-    applyBtn: { backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8 },
-    applyBtnText: { color: '#000000', fontWeight: '700', fontSize: 12 },
-    swatch: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
-        marginRight: 10,
-        borderWidth: 1,
-        borderColor: '#4B5563',
+    menuListContent: {
+        padding: 16,
+        gap: 10,
     },
-    galleryBtn: {
+    menuRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 11,
-        borderRadius: 10,
-        marginTop: 6,
+        backgroundColor: '#151822',
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
     },
-    galleryBtnText: { color: '#000000', fontWeight: '700', marginLeft: 8 },
-    slidersBox: { backgroundColor: '#111827', borderRadius: 10, padding: 12, marginTop: 10 },
-    sliderLabel: { color: '#E5E7EB', fontSize: 13, marginTop: 6 },
-    infoText: { color: '#9CA3AF', fontSize: 13, marginBottom: 4 },
+    menuIconWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    menuTextCol: {
+        flex: 1,
+        marginLeft: 14,
+        marginRight: 8,
+    },
+    menuTitle: {
+        color: '#FFFFFF',
+        fontSize: 15.5,
+        fontWeight: '700',
+    },
+    menuSubtitle: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        marginTop: 2,
+    },
+    subContent: {
+        padding: 18,
+        gap: 12,
+        paddingBottom: 40,
+    },
+    subDescription: {
+        color: '#9CA3AF',
+        fontSize: 13.5,
+        lineHeight: 20,
+        marginBottom: 4,
+    },
+    optionCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#151822',
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
+    },
+    optionCardActive: {
+        borderColor: '#2563EB',
+        backgroundColor: '#17223B',
+    },
+    optionTitle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    infoCard: {
+        backgroundColor: '#151822',
+        padding: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
+        gap: 6,
+    },
+    infoCardTitle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    infoCardBody: {
+        color: '#A1A1AA',
+        fontSize: 13.5,
+        lineHeight: 20,
+    },
     dangerBtn: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
         backgroundColor: '#991B1B',
-        padding: 10,
-        borderRadius: 8,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
         alignSelf: 'flex-start',
-        marginBottom: 8,
+    },
+    dangerBtnText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+        fontSize: 14,
     },
     trashRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        alignItems: 'center',
+        backgroundColor: '#151822',
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
+    },
+    trashTitle: {
+        color: '#FFFFFF',
+        fontSize: 14.5,
+        fontWeight: '600',
+    },
+    trashArtist: {
+        color: '#9CA3AF',
+        fontSize: 12.5,
+        marginTop: 2,
+    },
+    restorePill: {
+        backgroundColor: 'rgba(96,165,250,0.16)',
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 999,
+    },
+    restoreText: {
+        color: '#60A5FA',
+        fontSize: 12.5,
+        fontWeight: '700',
     },
     reportInput: {
-        backgroundColor: '#111827',
+        backgroundColor: '#151822',
         color: '#FFFFFF',
-        borderRadius: 8,
-        padding: 10,
-        minHeight: 70,
+        borderRadius: 14,
+        padding: 14,
+        minHeight: 120,
         borderWidth: 1,
-        borderColor: '#374151',
-        marginBottom: 8,
+        borderColor: 'rgba(255,255,255,0.1)',
         textAlignVertical: 'top',
+        fontSize: 14.5,
+    },
+    primaryBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#FFFFFF',
+        paddingVertical: 13,
+        borderRadius: 14,
+    },
+    primaryBtnText: {
+        color: '#000000',
+        fontWeight: '800',
+        fontSize: 14.5,
     },
 });
