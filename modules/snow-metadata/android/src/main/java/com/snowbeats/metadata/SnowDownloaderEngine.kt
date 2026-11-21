@@ -26,6 +26,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 
 // Motor nativo de extracción y descarga basado en yt-dlp (github.com/yt-dlp/yt-dlp) + FFmpeg
@@ -33,12 +35,17 @@ object SnowDownloaderEngine {
   private const val TAG = "SnowDownloaderEngine"
   private const val PREFS_NAME = "snow_beats_storage_prefs"
   private const val KEY_SAF_TREE_URI = "saf_tree_uri"
+  private const val KEY_LAST_YTDLP_UPDATE_MS = "last_ytdlp_update_ms"
+  private const val YTDLP_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L
   const val SAF_TREE_REQUEST_CODE = 5092
   const val LEGACY_STORAGE_REQUEST_CODE = 5091
 
   @Volatile
   private var initialized = false
+  @Volatile
+  private var updatedThisSession = false
   private val initLock = Any()
+  private val updateLock = Any()
 
   private val allowedHosts = listOf(
     "youtube.com",
@@ -55,6 +62,13 @@ object SnowDownloaderEngine {
     "x.com",
     "twitter.com",
     "t.co"
+  )
+
+  // Clientes de YouTube que funcionan sin inicio de sesión ni cookies en Android
+  private val youtubeClientStrategies = listOf(
+    "youtube:player_client=android,tv",
+    "youtube:player_client=tv,mweb",
+    null
   )
 
   fun ensureInitialized(context: Context) {
@@ -87,6 +101,39 @@ object SnowDownloaderEngine {
         Log.w(TAG, "FFmpeg no disponible: ${buildCauseChain(e)}")
       }
       initialized = true
+
+      // Actualiza el binario yt-dlp una vez cada 24h en segundo plano para evitar bloqueos 403 de YouTube/IG
+      maybeUpdateYtDlp(appCtx, force = false)
+    }
+  }
+
+  // Actualiza yt-dlp desde el canal estable oficial (resuelve cambios frecuentes de YouTube/Instagram)
+  private fun maybeUpdateYtDlp(context: Context, force: Boolean): Boolean {
+    synchronized(updateLock) {
+      val appCtx = context.applicationContext
+      if (!isNetworkAvailable(appCtx)) return false
+      val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      val lastUpdate = prefs.getLong(KEY_LAST_YTDLP_UPDATE_MS, 0L)
+      val now = System.currentTimeMillis()
+
+      if (!force && (now - lastUpdate) < YTDLP_UPDATE_INTERVAL_MS) {
+        return false
+      }
+      if (force && updatedThisSession) {
+        return false
+      }
+
+      return try {
+        Log.i(TAG, "Actualizando binario interno de yt-dlp (force=$force)...")
+        YoutubeDL.getInstance().updateYoutubeDL(appCtx)
+        updatedThisSession = true
+        prefs.edit().putLong(KEY_LAST_YTDLP_UPDATE_MS, now).apply()
+        Log.i(TAG, "yt-dlp actualizado correctamente.")
+        true
+      } catch (e: Exception) {
+        Log.w(TAG, "No se pudo actualizar yt-dlp: ${buildCauseChain(e)}")
+        false
+      }
     }
   }
 
@@ -260,9 +307,150 @@ object SnowDownloaderEngine {
     }
   }
 
+  // Limpia parámetros de rastreo (?dmpr=, ?avpt=, ?igsh=) en URLs de Instagram para mejorar compatibilidad
+  private fun normalizeUrl(rawUrl: String): String {
+    val trimmed = rawUrl.trim()
+    return try {
+      val uri = Uri.parse(trimmed)
+      val host = (uri.host ?: "").lowercase(Locale.US)
+      if (host.contains("instagram.com")) {
+        val path = (uri.path ?: "").trimEnd('/')
+        if (path.startsWith("/reel/") || path.startsWith("/reels/") || path.startsWith("/p/") || path.startsWith("/tv/")) {
+          val normalizedPath = path.replaceFirst("/reels/", "/reel/")
+          return "https://www.instagram.com$normalizedPath/"
+        }
+      }
+      trimmed
+    } catch (_: Exception) {
+      trimmed
+    }
+  }
+
+  private fun isRetryableExtractorError(e: Exception): Boolean {
+    val raw = buildCauseChain(e).lowercase(Locale.US)
+    return raw.contains("403") ||
+      raw.contains("forbidden") ||
+      raw.contains("sign in") ||
+      raw.contains("bot") ||
+      raw.contains("player") ||
+      raw.contains("requested format is not available") ||
+      raw.contains("nsig") ||
+      raw.contains("sabr")
+  }
+
+  // Respaldo público para Reels/Posts de Instagram vía página embed cuando yt-dlp recibe bloqueo anónimo
+  private fun tryInstagramPublicEmbedFallback(canonicalUrl: String): Map<String, Any?>? {
+    val match = Regex("instagram\\.com/(reel|p|tv)/([A-Za-z0-9_-]+)").find(canonicalUrl) ?: return null
+    val kind = match.groupValues[1]
+    val shortcode = match.groupValues[2]
+    val embedUrl = "https://www.instagram.com/$kind/$shortcode/embed/captioned/"
+
+    return try {
+      val conn = (URL(embedUrl).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 10000
+        readTimeout = 10000
+        instanceFollowRedirects = true
+        setRequestProperty(
+          "User-Agent",
+          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+        )
+        setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        setRequestProperty("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
+      }
+      if (conn.responseCode !in 200..299) {
+        conn.disconnect()
+        return null
+      }
+      val html = conn.inputStream.bufferedReader().use { it.readText() }
+      conn.disconnect()
+
+      val rawVideoUrl = Regex("\"video_url\"\\s*:\\s*\"([^\"]+)\"")
+        .find(html)?.groupValues?.getOrNull(1)
+        ?: Regex("\\\\\"video_url\\\\\"\\s*:\\s*\\\\\"([^\\\\\"]+)\\\\\"")
+          .find(html)?.groupValues?.getOrNull(1)
+        ?: return null
+
+      val videoUrl = unescapeJsonUrl(rawVideoUrl)
+      if (!videoUrl.startsWith("http")) return null
+
+      val rawThumb = Regex("\"display_url\"\\s*:\\s*\"([^\"]+)\"")
+        .find(html)?.groupValues?.getOrNull(1)
+        ?: Regex("\"thumbnail_src\"\\s*:\\s*\"([^\"]+)\"")
+          .find(html)?.groupValues?.getOrNull(1)
+      val thumbUrl = rawThumb?.let { unescapeJsonUrl(it) }?.takeIf { it.startsWith("http") }
+
+      val rawAuthor = Regex("\"username\"\\s*:\\s*\"([^\"]+)\"")
+        .find(html)?.groupValues?.getOrNull(1) ?: "Instagram"
+
+      val title = "Instagram Reel · @$rawAuthor"
+
+      mapOf(
+        "ok" to true,
+        "isPlaylist" to false,
+        "isAudioOnly" to false,
+        "title" to title,
+        "uploader" to "@$rawAuthor",
+        "domain" to "instagram.com",
+        "platform" to "Instagram",
+        "thumbnail" to thumbUrl,
+        "duration" to 0.0,
+        "url" to videoUrl,
+        "previewStreamUrl" to videoUrl,
+        "entries" to emptyList<Map<String, Any?>>(),
+        "audioFormats" to listOf(
+          mapOf(
+            "id" to "ig_audio_128",
+            "formatId" to "bestaudio/best",
+            "mediaType" to "audio",
+            "label" to "MP3 clásico (128 kbps)",
+            "ext" to "mp3",
+            "qualityRank" to 128,
+            "audioQuality" to "128K",
+            "filesize" to 0L
+          ),
+          mapOf(
+            "id" to "ig_audio_192",
+            "formatId" to "bestaudio/best",
+            "mediaType" to "audio",
+            "label" to "Alta calidad (192 kbps)",
+            "ext" to "mp3",
+            "qualityRank" to 192,
+            "audioQuality" to "192K",
+            "filesize" to 0L
+          )
+        ),
+        "videoFormats" to listOf(
+          mapOf(
+            "id" to "ig_video_best",
+            "formatId" to "best",
+            "mediaType" to "video",
+            "label" to "Calidad original (MP4)",
+            "ext" to "mp4",
+            "qualityRank" to 720,
+            "height" to 720,
+            "filesize" to 0L
+          )
+        )
+      )
+    } catch (e: Exception) {
+      Log.w(TAG, "Respaldo embed de Instagram no disponible: ${e.message}")
+      null
+    }
+  }
+
+  private fun unescapeJsonUrl(raw: String): String {
+    return raw
+      .replace("\\/", "/")
+      .replace("\\u0026", "&")
+      .replace("\\u002F", "/")
+      .replace("&amp;", "&")
+      .replace("\\\\", "\\")
+  }
+
   // Extrae metadatos, formatos disponibles (audio/video ordenados de menor a mayor) o elementos de playlist
   fun extractMediaInfo(context: Context, rawUrl: String): Map<String, Any?> {
-    val url = rawUrl.trim()
+    val url = normalizeUrl(rawUrl)
     if (!isAllowedUrl(url)) {
       return mapOf(
         "ok" to false,
@@ -279,19 +467,71 @@ object SnowDownloaderEngine {
       )
     }
 
+    val detectedPlatform = detectPlatform(url)
+
     return try {
       ensureInitialized(context)
 
-      val request = YoutubeDLRequest(url).apply {
-        addOption("--dump-single-json")
-        addOption("--no-warnings")
-        addOption("--flat-playlist")
-        addOption("--no-check-certificates")
+      val strategies: List<String?> = if (detectedPlatform == "YouTube") {
+        youtubeClientStrategies
+      } else {
+        listOf(null)
       }
 
-      val response = YoutubeDL.getInstance().execute(request, "extract_${System.currentTimeMillis()}")
-      val rawOut = response.out?.trim() ?: ""
+      var rawOut = ""
+      var lastException: Exception? = null
+      var didForceUpdate = false
+
+      var idx = 0
+      while (idx < strategies.size) {
+        val extractorArg = strategies[idx]
+        try {
+          val request = YoutubeDLRequest(url).apply {
+            addOption("--dump-single-json")
+            addOption("--no-warnings")
+            addOption("--flat-playlist")
+            addOption("--no-check-certificates")
+            addOption("--geo-bypass")
+            if (extractorArg != null) {
+              addOption("--extractor-args", extractorArg)
+            }
+          }
+          val response = YoutubeDL.getInstance().execute(request, "extract_${System.currentTimeMillis()}")
+          val out = response.out?.trim() ?: ""
+          if (out.isNotBlank()) {
+            rawOut = out
+            lastException = null
+            break
+          }
+        } catch (e: Exception) {
+          lastException = e
+          Log.w(TAG, "extractMediaInfo fallo (platform=$detectedPlatform, arg=$extractorArg): ${buildCauseChain(e)}")
+          // Si falla por bloqueo/403 y aún no actualizamos yt-dlp en esta sesión, actualiza y reintenta
+          if (!didForceUpdate && isRetryableExtractorError(e)) {
+            didForceUpdate = true
+            if (maybeUpdateYtDlp(context, force = true)) {
+              continue
+            }
+          }
+        }
+        idx++
+      }
+
       if (rawOut.isBlank()) {
+        // Para Instagram público intenta respaldo embed antes de rendirse
+        if (detectedPlatform == "Instagram") {
+          val igFallback = tryInstagramPublicEmbedFallback(url)
+          if (igFallback != null) return igFallback
+        }
+
+        if (lastException != null) {
+          val (code, msg) = classifyError(lastException, context, detectedPlatform)
+          return mapOf(
+            "ok" to false,
+            "errorCode" to code,
+            "errorMessage" to msg
+          )
+        }
         return mapOf(
           "ok" to false,
           "errorCode" to "EMPTY_RESPONSE",
@@ -302,7 +542,7 @@ object SnowDownloaderEngine {
       val jsonLine = rawOut.lineSequence().lastOrNull { it.trim().startsWith("{") } ?: rawOut
       val root = JSONObject(jsonLine)
       val type = root.optString("_type", "video")
-      val platform = detectPlatform(url) ?: root.optString("extractor_key", "Web")
+      val platform = detectedPlatform ?: root.optString("extractor_key", "Web")
       val hostDomain = Uri.parse(url).host ?: platform
 
       // Caso 1: Playlist o colección de múltiples videos/pistas
@@ -376,7 +616,7 @@ object SnowDownloaderEngine {
         "videoFormats" to parsedFormats.second
       )
     } catch (e: Exception) {
-      val (code, msg) = classifyError(e, context)
+      val (code, msg) = classifyError(e, context, detectedPlatform)
       mapOf(
         "ok" to false,
         "errorCode" to code,
@@ -490,7 +730,7 @@ object SnowDownloaderEngine {
         if (existing == null || ext == "m4a") {
           audioByKbps[bucket] = mutableMapOf(
             "id" to "audio_${bucket}_${formatId}",
-            "formatId" to formatId,
+            "formatId" to "bestaudio[ext=m4a]/bestaudio/best",
             "mediaType" to "audio",
             "label" to "MP3 ${bucket} kbps",
             "ext" to "mp3",
@@ -516,11 +756,9 @@ object SnowDownloaderEngine {
           } else {
             estimatedSize
           }
-          val selector = if (acodec == "none") {
-            "${formatId}+bestaudio[ext=m4a]/best[height<=${height}]/best"
-          } else {
-            formatId
-          }
+          // Selector resiliente por altura (evita fallos 403 por format_id caducados o específicos de un cliente)
+          val selector =
+            "bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best"
           videoByHeight[height] = mutableMapOf(
             "id" to "video_${height}_${formatId}",
             "formatId" to selector,
@@ -644,7 +882,8 @@ object SnowDownloaderEngine {
     targetDisplayPath: String,
     onProgress: (Float, Long, String) -> Unit
   ): Map<String, Any?> {
-    val url = rawUrl.trim()
+    val url = normalizeUrl(rawUrl)
+    val detectedPlatform = detectPlatform(url)
 
     if (!hasStorageWritePermission(context)) {
       return mapOf(
@@ -681,29 +920,75 @@ object SnowDownloaderEngine {
     return try {
       ensureInitialized(context)
 
-      val request = YoutubeDLRequest(url).apply {
-        addOption("--no-playlist")
-        addOption("--no-warnings")
-        addOption("--no-check-certificates")
-        addOption("--newline")
-        addOption("--restrict-filenames")
-        addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
-
-        if (mediaType == "audio") {
-          addOption("-f", formatId.ifBlank { "bestaudio/best" })
-          addOption("-x")
-          addOption("--audio-format", "mp3")
-          addOption("--audio-quality", audioQuality ?: "128K")
-          addOption("--embed-thumbnail")
-          addOption("--add-metadata")
-        } else {
-          addOption("-f", formatId.ifBlank { "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" })
-          addOption("--merge-output-format", "mp4")
-        }
+      val strategies: List<String?> = if (detectedPlatform == "YouTube") {
+        youtubeClientStrategies
+      } else {
+        listOf(null)
       }
 
-      YoutubeDL.getInstance().execute(request, taskId) { progress, etaInSeconds, line ->
-        onProgress(progress, etaInSeconds, line)
+      var lastError: Exception? = null
+      var didForceUpdate = false
+      var succeeded = false
+
+      var idx = 0
+      while (idx < strategies.size) {
+        val extractorArg = strategies[idx]
+        // Limpia archivos parciales de un intento fallido previo
+        tempDir.listFiles()?.forEach { it.deleteRecursively() }
+
+        try {
+          val request = YoutubeDLRequest(url).apply {
+            addOption("--no-playlist")
+            addOption("--no-warnings")
+            addOption("--no-check-certificates")
+            addOption("--geo-bypass")
+            addOption("--retries", "3")
+            addOption("--fragment-retries", "3")
+            addOption("--newline")
+            addOption("--restrict-filenames")
+            if (extractorArg != null) {
+              addOption("--extractor-args", extractorArg)
+            }
+            addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
+
+            if (mediaType == "audio") {
+              addOption("-f", formatId.ifBlank { "bestaudio[ext=m4a]/bestaudio/best" })
+              addOption("-x")
+              addOption("--audio-format", "mp3")
+              addOption("--audio-quality", audioQuality ?: "128K")
+              addOption("--embed-thumbnail")
+              addOption("--add-metadata")
+            } else {
+              addOption("-f", formatId.ifBlank { "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" })
+              addOption("--merge-output-format", "mp4")
+            }
+          }
+
+          YoutubeDL.getInstance().execute(request, taskId) { progress, etaInSeconds, line ->
+            onProgress(progress, etaInSeconds, line)
+          }
+          succeeded = true
+          lastError = null
+          break
+        } catch (e: Exception) {
+          lastError = e
+          val rawErr = buildCauseChain(e).lowercase(Locale.US)
+          Log.w(TAG, "downloadMedia fallo (platform=$detectedPlatform, arg=$extractorArg): $rawErr")
+          if (rawErr.contains("canceled") || rawErr.contains("cancelled") || rawErr.contains("destroyed")) {
+            throw e
+          }
+          if (!didForceUpdate && isRetryableExtractorError(e)) {
+            didForceUpdate = true
+            if (maybeUpdateYtDlp(context, force = true)) {
+              continue
+            }
+          }
+        }
+        idx++
+      }
+
+      if (!succeeded && lastError != null) {
+        throw lastError
       }
 
       val downloadedFile = tempDir.listFiles()
@@ -746,7 +1031,7 @@ object SnowDownloaderEngine {
         "fileName" to exported.second
       )
     } catch (e: Exception) {
-      val (code, msg) = classifyError(e, context)
+      val (code, msg) = classifyError(e, context, detectedPlatform)
       mapOf(
         "ok" to false,
         "errorCode" to code,
@@ -1004,10 +1289,15 @@ object SnowDownloaderEngine {
     }
   }
 
-  // Clasifica cualquier error de yt-dlp / Android en un motivo claro para el usuario
-  private fun classifyError(e: Exception, context: Context): Pair<String, String> {
+  // Clasifica cualquier error de yt-dlp / Android en un motivo claro y veraz para el usuario
+  private fun classifyError(
+    e: Exception,
+    context: Context,
+    platform: String? = null
+  ): Pair<String, String> {
     val fullMsg = buildCauseChain(e)
     val raw = fullMsg.lowercase(Locale.US)
+    val platLabel = platform ?: "La plataforma"
     return when {
       raw.contains("libpython.zip.so") || raw.contains("uselegacypackaging") ->
         Pair("INIT_FAILED", fullMsg)
@@ -1031,17 +1321,33 @@ object SnowDownloaderEngine {
       raw.contains("permission denied") || raw.contains("eacces") || raw.contains("read-only file system") ->
         Pair("PERMISSION_DENIED", "Permiso de escritura denegado en la ruta de destino.")
 
-      raw.contains("private video") ||
-        raw.contains("login required") ||
+      raw.contains("requested format is not available") ->
+        Pair("FORMAT_UNAVAILABLE", "La calidad elegida no está disponible para este enlace. Prueba otra opción.")
+
+      raw.contains("403") || raw.contains("forbidden") ->
+        Pair(
+          "HTTP_403",
+          "$platLabel bloqueó temporalmente el flujo (HTTP 403). Intenta de nuevo o prueba otra calidad."
+        )
+
+      raw.contains("login required") ||
+        raw.contains("empty media response") ||
+        raw.contains("confirm you're not a bot") ||
         raw.contains("sign in") ||
-        raw.contains("unavailable") ||
+        raw.contains("cookies") ->
+        Pair(
+          "LOGIN_REQUIRED",
+          "$platLabel bloqueó el acceso anónimo para este enlace (requiere sesión o límite anti-bot temporal)."
+        )
+
+      raw.contains("private video") ||
+        raw.contains("video unavailable") ||
         raw.contains("removed") ||
-        raw.contains("404") ||
-        raw.contains("403") ->
-        Pair("PRIVATE_OR_UNAVAILABLE", "El contenido es privado, requiere inicio de sesión o no está disponible.")
+        raw.contains("404") ->
+        Pair("PRIVATE_OR_UNAVAILABLE", "El contenido es privado, fue eliminado o no está disponible.")
 
       raw.contains("429") || raw.contains("too many requests") ->
-        Pair("RATE_LIMITED", "La plataforma limitó temporalmente las peticiones (HTTP 429). Intenta más tarde.")
+        Pair("RATE_LIMITED", "$platLabel limitó temporalmente las peticiones (HTTP 429). Intenta más tarde.")
 
       raw.contains("unsupported url") ->
         Pair("UNSUPPORTED_URL", "URL no soportada por yt-dlp.")
