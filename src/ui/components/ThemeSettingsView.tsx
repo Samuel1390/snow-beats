@@ -397,7 +397,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         <Image
                                             source={{ uri: img.uri }}
                                             blurRadius={img.blur}
-                                            style={StyleSheet.absoluteFill}
+                                            style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
                                         <View
@@ -457,7 +457,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                     >
                                         <Image
                                             source={source}
-                                            style={StyleSheet.absoluteFill}
+                                            style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
                                         {isSelected && (
@@ -758,6 +758,10 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
         borderColor: 'rgba(255,255,255,0.18)',
         position: 'relative',
+    },
+    savedImageFill: {
+        width: '100%',
+        height: '100%',
     },
     savedImageRectSelected: {
         borderColor: '#FFFFFF',

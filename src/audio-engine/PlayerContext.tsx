@@ -7,8 +7,15 @@ import React, {
     useRef,
     useState,
 } from 'react';
+import { Platform } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
-import { readTrackTags } from '../../modules/snow-metadata';
+import {
+    addMediaActionListener,
+    dismissMediaNotification,
+    readTrackTags,
+    requestNotificationPermission,
+    updateMediaNotification,
+} from '../../modules/snow-metadata';
 import {
     hideTrack,
     markTrackPlayed,
@@ -77,6 +84,38 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queueRef.current = [...queueRef.current, ...items];
     }, []);
 
+    const notifPermRequestedRef = useRef<boolean>(false);
+
+    // Sincroniza estado actual con el control multimedia flotante de Android
+    const syncNotification = useCallback(
+        (
+            track: Track | null,
+            playing: boolean,
+            posSec?: number,
+            durSec?: number
+        ) => {
+            if (Platform.OS !== 'android') return;
+            if (!track) {
+                dismissMediaNotification().catch(() => { });
+                return;
+            }
+            const currentPos = posSec ?? playerRef.current?.currentTime ?? 0;
+            const totalDur = durSec ?? (playerRef.current?.duration || track.duration || 0);
+            updateMediaNotification({
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                artworkUri: track.artworkUri,
+                isPlaying: playing,
+                isFavorite: track.isFavorite,
+                positionMs: Math.max(0, Math.round(currentPos * 1000)),
+                durationMs: Math.max(0, Math.round(totalDur * 1000)),
+                speed: playbackRateRef.current,
+            }).catch(() => { });
+        },
+        []
+    );
+
     // Configura audio en segundo plano al iniciar
     useEffect(() => {
         setAudioModeAsync({
@@ -86,6 +125,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         return () => {
             playerRef.current?.remove();
+            if (Platform.OS === 'android') {
+                dismissMediaNotification().catch(() => { });
+            }
         };
     }, []);
 
@@ -123,11 +165,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         playerRef.current = player;
         player.play();
 
+        if (Platform.OS === 'android' && !notifPermRequestedRef.current) {
+            notifPermRequestedRef.current = true;
+            requestNotificationPermission().catch(() => { });
+        }
+
         currentTrackRef.current = track;
         setCurrentTrack(track);
         setPosition(0);
         setDuration(track.duration);
         setIsPlaying(true);
+        syncNotification(track, true, 0, track.duration);
 
         markTrackPlayed(track.id).catch(() => { });
 
@@ -148,11 +196,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     if (currentTrackRef.current?.id === track.id) {
                         currentTrackRef.current = updated;
                         setCurrentTrack(updated);
+                        syncNotification(updated, Boolean(playerRef.current?.playing));
                     }
                 })
                 .catch(() => { });
         }
-    }, []);
+    }, [syncNotification]);
 
     const playNext = useCallback(async () => {
         const list = queueRef.current;
@@ -213,23 +262,30 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (p.playing) {
             p.pause();
             setIsPlaying(false);
+            syncNotification(currentTrackRef.current, false);
         } else {
             p.play();
             setIsPlaying(true);
+            syncNotification(currentTrackRef.current, true);
         }
-    }, []);
+    }, [syncNotification]);
 
     const pausePlayback = useCallback(() => {
         const p = playerRef.current;
         if (!p || !p.playing) return;
         p.pause();
         setIsPlaying(false);
-    }, []);
+        syncNotification(currentTrackRef.current, false);
+    }, [syncNotification]);
 
-    const seekTo = useCallback((seconds: number) => {
-        playerRef.current?.seekTo(seconds);
-        setPosition(seconds);
-    }, []);
+    const seekTo = useCallback(
+        (seconds: number) => {
+            playerRef.current?.seekTo(seconds);
+            setPosition(seconds);
+            syncNotification(currentTrackRef.current, Boolean(playerRef.current?.playing), seconds);
+        },
+        [syncNotification]
+    );
 
     const cycleRepeatMode = useCallback(() => {
         setRepeatMode((prev) => {
@@ -269,8 +325,53 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const updated = { ...curr, isFavorite: next };
         currentTrackRef.current = updated;
         setCurrentTrack(updated);
+        syncNotification(updated, Boolean(playerRef.current?.playing));
         await toggleTrackFavorite(curr.id, next);
-    }, []);
+    }, [syncNotification]);
+
+    // Escucha los botones del control multimedia flotante de la barra de notificaciones
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        const sub = addMediaActionListener((evt) => {
+            switch (evt.action) {
+                case 'play':
+                    if (playerRef.current && !playerRef.current.playing) {
+                        playerRef.current.play();
+                        setIsPlaying(true);
+                        syncNotification(currentTrackRef.current, true);
+                    }
+                    break;
+                case 'pause':
+                    pausePlayback();
+                    break;
+                case 'toggle':
+                    togglePlayPause();
+                    break;
+                case 'next':
+                    playNext();
+                    break;
+                case 'previous':
+                    playPrevious();
+                    break;
+                case 'favorite':
+                    toggleFavorite();
+                    break;
+                case 'seek':
+                    if (typeof evt.positionSec === 'number' && evt.positionSec >= 0) {
+                        seekTo(evt.positionSec);
+                    }
+                    break;
+                case 'close':
+                    if (playerRef.current) {
+                        playerRef.current.pause();
+                        setIsPlaying(false);
+                    }
+                    dismissMediaNotification().catch(() => { });
+                    break;
+            }
+        });
+        return () => sub?.remove();
+    }, [pausePlayback, togglePlayPause, playNext, playPrevious, toggleFavorite, seekTo, syncNotification]);
 
     const hideCurrentTrack = useCallback(async () => {
         const curr = currentTrackRef.current;

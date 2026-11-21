@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
+    Image,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -12,26 +13,40 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import {
     ArrowLeft,
     BarChart3,
     Check,
     ChevronRight,
+    FolderDown,
     Globe,
+    ImagePlus,
     Info,
     Mail,
     Palette,
+    RotateCcw,
     Timer,
     Trash2,
+    X,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeContext';
 import { emptyTrash, getDeletedTracks, restoreTrack } from '../../storage/database/db';
+import {
+    DEFAULT_AUDIO_DOWNLOAD_PATH,
+    DEFAULT_VIDEO_DOWNLOAD_PATH,
+    getDownloadPaths,
+    resetDownloadPaths,
+    saveDownloadPaths,
+} from '../../storage/downloadSettings';
+import { sendEmailWithAttachments } from '../../../modules/snow-metadata';
 import { Track } from '../../types/music';
 import { ThemeSettingsView } from '../components/ThemeSettingsView';
 
 type SettingsSection =
     | 'theme'
+    | 'download_paths'
     | 'timer'
     | 'stats'
     | 'trash'
@@ -52,12 +67,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     const [sleepMinutes, setSleepMinutes] = useState<number>(0);
     const [trash, setTrash] = useState<Track[]>([]);
     const [bugReport, setBugReport] = useState('');
+    const [reportImages, setReportImages] = useState<string[]>([]);
+    const [audioDownloadPath, setAudioDownloadPath] = useState(DEFAULT_AUDIO_DOWNLOAD_PATH);
+    const [videoDownloadPath, setVideoDownloadPath] = useState(DEFAULT_VIDEO_DOWNLOAD_PATH);
+    const [pathsSavedFeedback, setPathsSavedFeedback] = useState(false);
 
     useEffect(() => {
         if (visible) {
             setActiveSection(null);
+            setPathsSavedFeedback(false);
             getDeletedTracks()
                 .then(setTrash)
+                .catch(() => { });
+            getDownloadPaths()
+                .then((cfg) => {
+                    setAudioDownloadPath(cfg.audioPath);
+                    setVideoDownloadPath(cfg.videoPath);
+                })
                 .catch(() => { });
         }
     }, [visible]);
@@ -70,10 +96,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
         }
     };
 
-    const sendBugReport = () => {
-        const subject = encodeURIComponent('Snow Beats - Reporte de problema');
-        const body = encodeURIComponent(bugReport || 'Describe el error aquí...');
-        Linking.openURL(`mailto:snelo1390@gmail.com?subject=${subject}&body=${body}`);
+    // Permite adjuntar opcionalmente hasta 5 capturas de pantalla para explicar un problema
+    const handlePickReportImages = async () => {
+        const remaining = 5 - reportImages.length;
+        if (remaining <= 0) {
+            Alert.alert('Límite alcanzado', 'Puedes adjuntar un máximo de 5 imágenes por reporte.');
+            return;
+        }
+        try {
+            const res = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsMultipleSelection: true,
+                selectionLimit: remaining,
+                quality: 0.85,
+            });
+            if (!res.canceled && res.assets?.length) {
+                const pickedUris = res.assets.map((a) => a.uri).filter(Boolean);
+                setReportImages((prev) => [...prev, ...pickedUris].slice(0, 5));
+            }
+        } catch {
+            Alert.alert('Imágenes', 'No se pudo abrir la galería para seleccionar capturas.');
+        }
+    };
+
+    const handleRemoveReportImage = (uri: string) => {
+        setReportImages((prev) => prev.filter((item) => item !== uri));
+    };
+
+    const sendBugReport = async () => {
+        const subject = 'Snow Beats - Reporte de problema';
+        const body = bugReport.trim() || 'Describe el error aquí...';
+
+        if (Platform.OS === 'android') {
+            const launched = await sendEmailWithAttachments(
+                'snelo1390@gmail.com',
+                subject,
+                body,
+                reportImages
+            );
+            if (launched) return;
+        }
+
+        const mailUrl = `mailto:snelo1390@gmail.com?subject=${encodeURIComponent(
+            subject
+        )}&body=${encodeURIComponent(body)}`;
+        Linking.openURL(mailUrl);
+    };
+
+    const handleSaveDownloadPaths = async () => {
+        const saved = await saveDownloadPaths({
+            audioPath: audioDownloadPath,
+            videoPath: videoDownloadPath,
+        });
+        setAudioDownloadPath(saved.audioPath);
+        setVideoDownloadPath(saved.videoPath);
+        setPathsSavedFeedback(true);
+        setTimeout(() => setPathsSavedFeedback(false), 2200);
+    };
+
+    const handleResetDownloadPaths = async () => {
+        const restored = await resetDownloadPaths();
+        setAudioDownloadPath(restored.audioPath);
+        setVideoDownloadPath(restored.videoPath);
+        setPathsSavedFeedback(true);
+        setTimeout(() => setPathsSavedFeedback(false), 2200);
     };
 
     const themeSubtitle =
@@ -96,6 +182,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
             subtitle: themeSubtitle,
             Icon: Palette,
             iconBg: '#1D4ED8',
+        },
+        {
+            key: 'download_paths',
+            title: 'Ruta de descarga',
+            subtitle: 'Carpetas de audio y video',
+            Icon: FolderDown,
+            iconBg: '#0284C7',
         },
         {
             key: 'timer',
@@ -207,6 +300,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                             ))}
                         </ScrollView>
                     </>
+                ) : activeSection === 'download_paths' ? (
+                    <KeyboardAvoidingView
+                        style={{ flex: 1 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    >
+                        {renderSubHeader('Ruta de descarga')}
+                        <ScrollView
+                            contentContainerStyle={styles.subContent}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            <Text style={styles.subDescription}>
+                                Configura las carpetas dentro del almacenamiento interno donde Snow Beats guardará tus descargas de audio y video.
+                            </Text>
+
+                            <View style={styles.pathCard}>
+                                <Text style={styles.pathLabel}>Carpeta de audio</Text>
+                                <TextInput
+                                    style={styles.pathInput}
+                                    value={audioDownloadPath}
+                                    onChangeText={setAudioDownloadPath}
+                                    placeholder={DEFAULT_AUDIO_DOWNLOAD_PATH}
+                                    placeholderTextColor="#71717A"
+                                    autoCorrect={false}
+                                />
+                            </View>
+
+                            <View style={styles.pathCard}>
+                                <Text style={styles.pathLabel}>Carpeta de video</Text>
+                                <TextInput
+                                    style={styles.pathInput}
+                                    value={videoDownloadPath}
+                                    onChangeText={setVideoDownloadPath}
+                                    placeholder={DEFAULT_VIDEO_DOWNLOAD_PATH}
+                                    placeholderTextColor="#71717A"
+                                    autoCorrect={false}
+                                />
+                            </View>
+
+                            <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveDownloadPaths}>
+                                <Check size={18} color="#000000" />
+                                <Text style={styles.primaryBtnText}>
+                                    {pathsSavedFeedback ? 'Rutas guardadas' : 'Guardar rutas'}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.secondaryBtn}
+                                onPress={handleResetDownloadPaths}
+                            >
+                                <RotateCcw size={16} color="#E4E4E7" />
+                                <Text style={styles.secondaryBtnText}>Restaurar rutas predeterminadas</Text>
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </KeyboardAvoidingView>
                 ) : activeSection === 'timer' ? (
                     <>
                         {renderSubHeader('Temporizador de apagado')}
@@ -331,7 +478,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                             keyboardShouldPersistTaps="handled"
                         >
                             <Text style={styles.subDescription}>
-                                Cuéntanos qué ocurrió y se abrirá tu app de correo con el reporte listo para enviar.
+                                Cuéntanos qué ocurrió y opcionalmente adjunta hasta 5 capturas para ayudarnos a reproducir el fallo.
                             </Text>
                             <TextInput
                                 style={styles.reportInput}
@@ -341,9 +488,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                 value={bugReport}
                                 onChangeText={setBugReport}
                             />
+
+                            {/* Adjunto opcional de hasta 5 imágenes */}
+                            <View style={styles.attachmentsBlock}>
+                                <View style={styles.attachmentsHeader}>
+                                    <Text style={styles.attachmentsTitle}>
+                                        Capturas adjuntas (opcional)
+                                    </Text>
+                                    <Text style={styles.attachmentsCounter}>
+                                        {reportImages.length}/5
+                                    </Text>
+                                </View>
+
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.attachmentsRow}
+                                >
+                                    {reportImages.length < 5 && (
+                                        <TouchableOpacity
+                                            style={styles.addAttachmentBtn}
+                                            activeOpacity={0.8}
+                                            onPress={handlePickReportImages}
+                                        >
+                                            <ImagePlus size={22} color="#60A5FA" />
+                                            <Text style={styles.addAttachmentText}>Adjuntar</Text>
+                                        </TouchableOpacity>
+                                    )}
+
+                                    {reportImages.map((uri) => (
+                                        <View key={uri} style={styles.attachmentThumbWrap}>
+                                            <Image
+                                                source={{ uri }}
+                                                style={styles.attachmentThumb}
+                                                resizeMode="cover"
+                                            />
+                                            <TouchableOpacity
+                                                style={styles.attachmentRemoveBtn}
+                                                onPress={() => handleRemoveReportImage(uri)}
+                                            >
+                                                <X size={13} color="#FFFFFF" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            </View>
+
                             <TouchableOpacity style={styles.primaryBtn} onPress={sendBugReport}>
                                 <Mail size={18} color="#000000" />
-                                <Text style={styles.primaryBtnText}>Enviar reporte por correo</Text>
+                                <Text style={styles.primaryBtnText}>
+                                    {reportImages.length > 0
+                                        ? `Enviar reporte (${reportImages.length} ${
+                                              reportImages.length === 1 ? 'imagen' : 'imágenes'
+                                          })`
+                                        : 'Enviar reporte por correo'}
+                                </Text>
                             </TouchableOpacity>
                         </ScrollView>
                     </KeyboardAvoidingView>
@@ -546,5 +745,112 @@ const styles = StyleSheet.create({
         color: '#000000',
         fontWeight: '800',
         fontSize: 14.5,
+    },
+    secondaryBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#1B2030',
+        paddingVertical: 12,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    secondaryBtnText: {
+        color: '#E4E4E7',
+        fontWeight: '700',
+        fontSize: 13.5,
+    },
+    pathCard: {
+        backgroundColor: '#151822',
+        padding: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+        gap: 8,
+    },
+    pathLabel: {
+        color: '#E4E4E7',
+        fontSize: 13.5,
+        fontWeight: '700',
+    },
+    pathInput: {
+        backgroundColor: '#0E1118',
+        color: '#FFFFFF',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 13,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    attachmentsBlock: {
+        backgroundColor: '#151822',
+        padding: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+        gap: 10,
+    },
+    attachmentsHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    attachmentsTitle: {
+        color: '#E4E4E7',
+        fontSize: 13.5,
+        fontWeight: '700',
+    },
+    attachmentsCounter: {
+        color: '#60A5FA',
+        fontSize: 12.5,
+        fontWeight: '700',
+    },
+    attachmentsRow: {
+        gap: 10,
+        paddingVertical: 2,
+    },
+    addAttachmentBtn: {
+        width: 78,
+        height: 78,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        borderStyle: 'dashed',
+        borderColor: 'rgba(96,165,250,0.45)',
+        backgroundColor: 'rgba(37,99,235,0.08)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 4,
+    },
+    addAttachmentText: {
+        color: '#93C5FD',
+        fontSize: 11.5,
+        fontWeight: '700',
+    },
+    attachmentThumbWrap: {
+        width: 78,
+        height: 78,
+        borderRadius: 12,
+        overflow: 'hidden',
+        position: 'relative',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+    },
+    attachmentThumb: {
+        width: '100%',
+        height: '100%',
+    },
+    attachmentRemoveBtn: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 });

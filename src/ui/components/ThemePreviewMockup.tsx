@@ -47,6 +47,7 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                             source={source}
                             blurRadius={previewTheme.customImage.blur}
                             style={styles.fill}
+                            imageStyle={styles.fillImage}
                             resizeMode="cover"
                         >
                             <View style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]} />
@@ -189,6 +190,10 @@ const styles = StyleSheet.create({
     },
     fill: {
         flex: 1,
+    },
+    fillImage: {
+        width: '100%',
+        height: '100%',
     },
     inner: {
         flex: 1,

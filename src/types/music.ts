@@ -10,6 +10,7 @@ export type SortOption =
     | 'duration_desc';
 
 export type MainTab =
+    | 'downloads'
     | 'songs'
     | 'playlists'
     | 'folders'

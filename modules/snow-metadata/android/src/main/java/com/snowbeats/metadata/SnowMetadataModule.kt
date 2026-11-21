@@ -1,6 +1,9 @@
 package com.snowbeats.metadata
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -14,10 +17,15 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.core.os.bundleOf
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayOutputStream
@@ -35,6 +43,26 @@ import kotlin.math.sin
 class SnowMetadataModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SnowMetadata")
+
+    Events("onMediaAction", "onDownloadProgress")
+
+    OnCreate {
+      SnowMediaNotificationService.actionListener = { action, positionSec ->
+        try {
+          sendEvent(
+            "onMediaAction",
+            bundleOf(
+              "action" to action,
+              "positionSec" to (positionSec ?: -1.0)
+            )
+          )
+        } catch (_: Exception) { }
+      }
+    }
+
+    OnDestroy {
+      SnowMediaNotificationService.actionListener = null
+    }
 
     // Extrae etiquetas ID3, guarda la portada en caché y devuelve el color dominante hex
     AsyncFunction("readTrackTags") { uriText: String, trackId: String ->
@@ -120,6 +148,206 @@ class SnowMetadataModule : Module() {
       } catch (_: Exception) {
         null
       }
+    }
+
+    // Solicita permiso POST_NOTIFICATIONS en Android 13+ para mostrar el control flotante
+    AsyncFunction("requestNotificationPermission") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@AsyncFunction true
+      val granted = ContextCompat.checkSelfPermission(
+        ctx,
+        Manifest.permission.POST_NOTIFICATIONS
+      ) == PackageManager.PERMISSION_GRANTED
+      if (granted) return@AsyncFunction true
+      val act = appContext.currentActivity
+      if (act != null) {
+        ActivityCompat.requestPermissions(
+          act,
+          arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+          4103
+        )
+      }
+      false
+    }
+
+    // Actualiza o inicia el control multimedia flotante clásico en la barra de notificaciones
+    AsyncFunction("updateMediaNotification") { payload: Map<String, Any?> ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      try {
+        val intent = Intent(ctx, SnowMediaNotificationService::class.java).apply {
+          action = SnowMediaNotificationService.ACTION_UPDATE
+          putExtra(SnowMediaNotificationService.EXTRA_TITLE, (payload["title"] as? String) ?: "Snow Beats")
+          putExtra(SnowMediaNotificationService.EXTRA_ARTIST, (payload["artist"] as? String) ?: "")
+          putExtra(SnowMediaNotificationService.EXTRA_ALBUM, (payload["album"] as? String) ?: "")
+          putExtra(SnowMediaNotificationService.EXTRA_ARTWORK, payload["artworkUri"] as? String)
+          putExtra(SnowMediaNotificationService.EXTRA_IS_PLAYING, (payload["isPlaying"] as? Boolean) ?: false)
+          putExtra(SnowMediaNotificationService.EXTRA_IS_FAVORITE, (payload["isFavorite"] as? Boolean) ?: false)
+          putExtra(SnowMediaNotificationService.EXTRA_POSITION_MS, ((payload["positionMs"] as? Number)?.toLong()) ?: 0L)
+          putExtra(SnowMediaNotificationService.EXTRA_DURATION_MS, ((payload["durationMs"] as? Number)?.toLong()) ?: 0L)
+          putExtra(SnowMediaNotificationService.EXTRA_SPEED, ((payload["speed"] as? Number)?.toFloat()) ?: 1.0f)
+        }
+        val isPlaying = (payload["isPlaying"] as? Boolean) ?: false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPlaying) {
+          ctx.startForegroundService(intent)
+        } else {
+          ctx.startService(intent)
+        }
+        true
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    // Cierra la notificación multimedia flotante
+    AsyncFunction("dismissMediaNotification") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      try {
+        val intent = Intent(ctx, SnowMediaNotificationService::class.java).apply {
+          action = SnowMediaNotificationService.ACTION_DISMISS
+        }
+        ctx.startService(intent)
+        true
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    // Abre el cliente de correo con hasta 5 imágenes adjuntas mediante FileProvider
+    AsyncFunction("sendEmailWithAttachments") { to: String, subject: String, body: String, imageUris: List<String> ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      launchEmailWithAttachments(ctx, to, subject, body, imageUris)
+    }
+
+    // Verifica permiso de escritura en almacenamiento interno para guardar descargas
+    AsyncFunction("hasStorageWritePermission") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      SnowDownloaderEngine.hasStorageWritePermission(ctx)
+    }
+
+    // Solicita permiso de almacenamiento al usuario (All Files Access en Android 11+ / WRITE_EXTERNAL_STORAGE en <=10)
+    AsyncFunction("requestStorageWritePermission") {
+      SnowDownloaderEngine.requestStorageWritePermission(appContext.currentActivity)
+    }
+
+    // Extrae información, streaming y formatos ordenados (o lista de reproducción) con yt-dlp
+    AsyncFunction("extractMediaInfo") { url: String ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction mapOf(
+        "ok" to false,
+        "errorCode" to "NO_CONTEXT",
+        "errorMessage" to "Contexto nativo no disponible."
+      )
+      SnowDownloaderEngine.extractMediaInfo(ctx, url)
+    }
+
+    // Ejecuta descarga mediante yt-dlp emitiendo progreso en tiempo real
+    AsyncFunction("downloadMedia") { options: Map<String, Any?> ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction mapOf(
+        "ok" to false,
+        "errorCode" to "NO_CONTEXT",
+        "errorMessage" to "Contexto nativo no disponible."
+      )
+      val taskId = (options["taskId"] as? String) ?: "dl_${System.currentTimeMillis()}"
+      val url = (options["url"] as? String) ?: ""
+      val formatId = (options["formatId"] as? String) ?: ""
+      val mediaType = (options["mediaType"] as? String) ?: "audio"
+      val audioQuality = options["audioQuality"] as? String
+      val targetPath = (options["targetPath"] as? String) ?: "Almacenamiento interno/Snow beats/Download"
+
+      var lastEmitMs = 0L
+      SnowDownloaderEngine.downloadMedia(
+        context = ctx,
+        taskId = taskId,
+        rawUrl = url,
+        formatId = formatId,
+        mediaType = mediaType,
+        audioQuality = audioQuality,
+        targetDisplayPath = targetPath
+      ) { progress, etaInSeconds, line ->
+        val now = System.currentTimeMillis()
+        if (now - lastEmitMs >= 220L || progress >= 99.5f) {
+          lastEmitMs = now
+          try {
+            sendEvent(
+              "onDownloadProgress",
+              bundleOf(
+                "taskId" to taskId,
+                "progress" to progress.toDouble().coerceIn(0.0, 100.0),
+                "etaSeconds" to etaInSeconds.toDouble(),
+                "line" to line.take(120)
+              )
+            )
+          } catch (_: Exception) { }
+        }
+      }
+    }
+
+    // Cancela una descarga activa de yt-dlp por su taskId
+    AsyncFunction("cancelDownload") { taskId: String ->
+      SnowDownloaderEngine.cancelDownload(taskId)
+    }
+  }
+
+  // ==================== ENVÍO DE CORREO CON IMÁGENES ADJUNTAS ====================
+
+  private fun launchEmailWithAttachments(
+    ctx: Context,
+    to: String,
+    subject: String,
+    body: String,
+    imageUris: List<String>
+  ): Boolean {
+    return try {
+      val authority = "${ctx.packageName}.snowbeats.fileprovider"
+      val cacheDir = File(ctx.cacheDir, "report_attachments").apply { mkdirs() }
+      val contentUris = ArrayList<Uri>()
+
+      imageUris.take(5).forEachIndexed { idx, rawUri ->
+        try {
+          val parsed = Uri.parse(rawUri)
+          val dest = File(cacheDir, "capture_${System.currentTimeMillis()}_$idx.jpg")
+          ctx.contentResolver.openInputStream(parsed)?.use { input ->
+            FileOutputStream(dest).use { output -> input.copyTo(output) }
+          }
+          if (dest.exists() && dest.length() > 0) {
+            contentUris.add(FileProvider.getUriForFile(ctx, authority, dest))
+          }
+        } catch (_: Exception) { }
+      }
+
+      val intent = if (contentUris.isEmpty()) {
+        Intent(Intent.ACTION_SENDTO).apply {
+          data = Uri.parse("mailto:")
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, body)
+        }
+      } else if (contentUris.size == 1) {
+        Intent(Intent.ACTION_SEND).apply {
+          type = "image/*"
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, body)
+          putExtra(Intent.EXTRA_STREAM, contentUris[0])
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+      } else {
+        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+          type = "image/*"
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, body)
+          putParcelableArrayListExtra(Intent.EXTRA_STREAM, contentUris)
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+      }
+
+      val chooser = Intent.createChooser(intent, "Enviar reporte de Snow Beats").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      ctx.startActivity(chooser)
+      true
+    } catch (_: Exception) {
+      false
     }
   }
 

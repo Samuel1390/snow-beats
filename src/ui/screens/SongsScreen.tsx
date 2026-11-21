@@ -20,6 +20,7 @@ import * as Sharing from 'expo-sharing';
 import { ArtistsTab } from './ArtistTab';
 import { AlbumsTab } from './AlbumsTab';
 import { VideosTab } from './VideosTab';
+import { DownloadsTab } from './DownloadsTab';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, ArrowUpDown, Settings } from 'lucide-react-native';
 import { MainTab, SortOption, Track } from '../../types/music';
@@ -43,6 +44,7 @@ import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 import { pickWebAudioFiles } from '../../storage/scanner/webAudioPicker';
 
 const TABS: { key: MainTab; label: string }[] = [
+    { key: 'downloads', label: 'Descargas' },
     { key: 'songs', label: 'Canciones' },
     { key: 'playlists', label: 'Playlists' },
     { key: 'folders', label: 'Carpetas' },
@@ -51,6 +53,8 @@ const TABS: { key: MainTab; label: string }[] = [
     { key: 'videos', label: 'Videos' },
 ];
 
+// Canciones sigue siendo la sección por defecto al abrir Snow Beats
+const DEFAULT_TAB_INDEX = 1;
 const INDICATOR_BASE_WIDTH = 100;
 
 interface SongsListPaneProps {
@@ -199,8 +203,10 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
 
 export const SongsScreen: React.FC = () => {
     const { width: screenWidth } = useWindowDimensions();
-    const [activeIndex, setActiveIndex] = useState<number>(0);
-    const [visitedTabs, setVisitedTabs] = useState<Record<number, boolean>>({ 0: true });
+    const [activeIndex, setActiveIndex] = useState<number>(DEFAULT_TAB_INDEX);
+    const [visitedTabs, setVisitedTabs] = useState<Record<number, boolean>>({
+        [DEFAULT_TAB_INDEX]: true,
+    });
     const [tracks, setTracks] = useState<Track[]>([]);
     const [sortBy, setSortBy] = useState<SortOption>('date_desc');
     const [loading, setLoading] = useState<boolean>(true);
@@ -227,7 +233,8 @@ export const SongsScreen: React.FC = () => {
 
     const pagerRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
     const tabsScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
-    const scrollX = useRef(new Animated.Value(0)).current;
+    const initialAlignedRef = useRef<boolean>(false);
+    const scrollX = useRef(new Animated.Value(DEFAULT_TAB_INDEX * screenWidth)).current;
     const [tabLayouts, setTabLayouts] = useState<Record<number, { x: number; width: number }>>({});
 
     const toggleSelect = useCallback((id: string) => {
@@ -353,6 +360,17 @@ export const SongsScreen: React.FC = () => {
         },
         [tabLayouts, screenWidth]
     );
+
+    // Alinea inicialmente el paginador en Canciones (índice 1) cuando termina de cargar la biblioteca
+    useEffect(() => {
+        if (loading || permissionDenied || initialAlignedRef.current || screenWidth <= 0) return;
+        initialAlignedRef.current = true;
+        const initialOffset = DEFAULT_TAB_INDEX * screenWidth;
+        scrollX.setValue(initialOffset);
+        requestAnimationFrame(() => {
+            pagerRef.current?.scrollTo({ x: initialOffset, animated: false });
+        });
+    }, [loading, permissionDenied, screenWidth, scrollX]);
 
     // Cambia de sección disparando primero el scroll nativo sin bloquear el hilo JS
     const goToTab = useCallback(
@@ -603,6 +621,7 @@ export const SongsScreen: React.FC = () => {
                     horizontal
                     pagingEnabled
                     bounces={false}
+                    contentOffset={{ x: DEFAULT_TAB_INDEX * screenWidth, y: 0 }}
                     showsHorizontalScrollIndicator={false}
                     scrollEventThrottle={16}
                     onScrollBeginDrag={handlePagerScrollBegin}
@@ -610,7 +629,17 @@ export const SongsScreen: React.FC = () => {
                     onScroll={onPagerScroll}
                     style={{ flex: 1 }}
                 >
-                    {/* Página 0: Canciones */}
+                    {/* Página 0 (a la izquierda de Canciones): Descargas con yt-dlp */}
+                    <View style={{ width: screenWidth, flex: 1 }}>
+                        {visitedTabs[0] && (
+                            <DownloadsTab
+                                isActive={activeIndex === 0}
+                                onDownloadCompleted={() => loadLibrary(sortBy, false)}
+                            />
+                        )}
+                    </View>
+
+                    {/* Página 1 (por defecto): Canciones */}
                     <View style={{ width: screenWidth, flex: 1 }}>
                         <SongsListPane
                             tracks={tracks}
@@ -629,16 +658,16 @@ export const SongsScreen: React.FC = () => {
                         />
                     </View>
 
-                    {/* Página 1: Playlists */}
+                    {/* Página 2: Playlists */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[1] && (
+                        {visitedTabs[2] && (
                             <PlaylistsTab onOpenPlayer={openPlayer} refreshKey={libraryVersion} />
                         )}
                     </View>
 
-                    {/* Página 2: Carpetas */}
+                    {/* Página 3: Carpetas */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[2] && (
+                        {visitedTabs[3] && (
                             <FoldersTab
                                 tracks={tracks}
                                 onOpenPlayer={openPlayer}
@@ -648,9 +677,9 @@ export const SongsScreen: React.FC = () => {
                         )}
                     </View>
 
-                    {/* Página 3: Artistas */}
+                    {/* Página 4: Artistas */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[3] && (
+                        {visitedTabs[4] && (
                             <ArtistsTab
                                 tracks={tracks}
                                 onOpenPlayer={openPlayer}
@@ -659,9 +688,9 @@ export const SongsScreen: React.FC = () => {
                         )}
                     </View>
 
-                    {/* Página 4: Álbumes */}
+                    {/* Página 5: Álbumes */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[4] && (
+                        {visitedTabs[5] && (
                             <AlbumsTab
                                 tracks={tracks}
                                 onOpenPlayer={openPlayer}
@@ -670,9 +699,9 @@ export const SongsScreen: React.FC = () => {
                         )}
                     </View>
 
-                    {/* Página 5: Videos */}
+                    {/* Página 6: Videos */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[5] && <VideosTab />}
+                        {visitedTabs[6] && <VideosTab />}
                     </View>
                 </Animated.ScrollView>
             )}

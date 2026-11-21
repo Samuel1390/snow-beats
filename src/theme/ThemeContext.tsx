@@ -150,6 +150,7 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
                     source={source}
                     blurRadius={theme.customImage.blur}
                     style={styles.fill}
+                    imageStyle={styles.fillImage}
                     resizeMode="cover"
                 >
                     <View style={[StyleSheet.absoluteFill, { backgroundColor: baseScrim }]} />
@@ -172,4 +173,5 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
 
 const styles = StyleSheet.create({
     fill: { flex: 1 },
+    fillImage: { width: '100%', height: '100%' },
 });
