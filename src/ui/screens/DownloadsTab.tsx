@@ -1053,15 +1053,17 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             </View>
                             <Text style={styles.permTitle}>Permiso de almacenamiento</Text>
                             <Text style={styles.permBody}>
-                                Snow Beats necesita permiso para guardar los audios y videos descargados en tu almacenamiento interno (carpeta Snow beats/Download).
+                                Elige una carpeta de destino (por ejemplo Música o una carpeta "Snow beats") y pulsa "Usar esta carpeta" → "Permitir" para guardar tus audios y videos descargados.
                             </Text>
                             <TouchableOpacity
                                 style={styles.permAllowBtn}
                                 activeOpacity={0.85}
                                 onPress={async () => {
-                                    await requestStorageWritePermission();
-                                    const granted = await refreshStoragePermission();
+                                    const grantedDirect = await requestStorageWritePermission();
+                                    const granted =
+                                        grantedDirect || (await refreshStoragePermission());
                                     if (granted) {
+                                        setHasStoragePerm(true);
                                         setStoragePermModalOpen(false);
                                         if (pendingActionRef.current) {
                                             const fn = pendingActionRef.current;
@@ -1071,7 +1073,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     }
                                 }}
                             >
-                                <Text style={styles.permAllowText}>Permitir almacenamiento</Text>
+                                <Text style={styles.permAllowText}>Seleccionar carpeta</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.permSkipBtn}

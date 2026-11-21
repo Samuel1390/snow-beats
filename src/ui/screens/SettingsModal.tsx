@@ -70,12 +70,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     const [reportImages, setReportImages] = useState<string[]>([]);
     const [audioDownloadPath, setAudioDownloadPath] = useState(DEFAULT_AUDIO_DOWNLOAD_PATH);
     const [videoDownloadPath, setVideoDownloadPath] = useState(DEFAULT_VIDEO_DOWNLOAD_PATH);
-    const [pathsSavedFeedback, setPathsSavedFeedback] = useState(false);
+    const [savedAudioPath, setSavedAudioPath] = useState(DEFAULT_AUDIO_DOWNLOAD_PATH);
+    const [savedVideoPath, setSavedVideoPath] = useState(DEFAULT_VIDEO_DOWNLOAD_PATH);
+
+    // Solo habilita "Guardar rutas" cuando alguna de las dos rutas cambió realmente
+    const hasUnsavedPathChanges =
+        audioDownloadPath.trim() !== savedAudioPath.trim() ||
+        videoDownloadPath.trim() !== savedVideoPath.trim();
 
     useEffect(() => {
         if (visible) {
             setActiveSection(null);
-            setPathsSavedFeedback(false);
             getDeletedTracks()
                 .then(setTrash)
                 .catch(() => { });
@@ -83,6 +88,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                 .then((cfg) => {
                     setAudioDownloadPath(cfg.audioPath);
                     setVideoDownloadPath(cfg.videoPath);
+                    setSavedAudioPath(cfg.audioPath);
+                    setSavedVideoPath(cfg.videoPath);
                 })
                 .catch(() => { });
         }
@@ -144,22 +151,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     };
 
     const handleSaveDownloadPaths = async () => {
+        if (!hasUnsavedPathChanges) return;
         const saved = await saveDownloadPaths({
             audioPath: audioDownloadPath,
             videoPath: videoDownloadPath,
         });
         setAudioDownloadPath(saved.audioPath);
         setVideoDownloadPath(saved.videoPath);
-        setPathsSavedFeedback(true);
-        setTimeout(() => setPathsSavedFeedback(false), 2200);
+        setSavedAudioPath(saved.audioPath);
+        setSavedVideoPath(saved.videoPath);
     };
 
     const handleResetDownloadPaths = async () => {
         const restored = await resetDownloadPaths();
         setAudioDownloadPath(restored.audioPath);
         setVideoDownloadPath(restored.videoPath);
-        setPathsSavedFeedback(true);
-        setTimeout(() => setPathsSavedFeedback(false), 2200);
+        setSavedAudioPath(restored.audioPath);
+        setSavedVideoPath(restored.videoPath);
     };
 
     const themeSubtitle =
@@ -338,10 +346,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                 />
                             </View>
 
-                            <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveDownloadPaths}>
-                                <Check size={18} color="#000000" />
-                                <Text style={styles.primaryBtnText}>
-                                    {pathsSavedFeedback ? 'Rutas guardadas' : 'Guardar rutas'}
+                            <TouchableOpacity
+                                style={[
+                                    styles.primaryBtn,
+                                    !hasUnsavedPathChanges && styles.primaryBtnSaved,
+                                ]}
+                                disabled={!hasUnsavedPathChanges}
+                                activeOpacity={0.85}
+                                onPress={handleSaveDownloadPaths}
+                            >
+                                <Check
+                                    size={18}
+                                    color={hasUnsavedPathChanges ? '#000000' : '#4ADE80'}
+                                />
+                                <Text
+                                    style={[
+                                        styles.primaryBtnText,
+                                        !hasUnsavedPathChanges && styles.primaryBtnTextSaved,
+                                    ]}
+                                >
+                                    {hasUnsavedPathChanges ? 'Guardar rutas' : 'Rutas guardadas'}
                                 </Text>
                             </TouchableOpacity>
 
@@ -741,10 +765,18 @@ const styles = StyleSheet.create({
         paddingVertical: 13,
         borderRadius: 14,
     },
+    primaryBtnSaved: {
+        backgroundColor: 'rgba(74,222,128,0.14)',
+        borderWidth: 1,
+        borderColor: 'rgba(74,222,128,0.35)',
+    },
     primaryBtnText: {
         color: '#000000',
         fontWeight: '800',
         fontSize: 14.5,
+    },
+    primaryBtnTextSaved: {
+        color: '#86EFAC',
     },
     secondaryBtn: {
         flexDirection: 'row',

@@ -2,6 +2,7 @@ package com.snowbeats.metadata
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,7 +13,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
-import android.provider.Settings
+import android.provider.DocumentsContract
+import android.provider.MediaStore
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.yausername.ffmpeg.FFmpeg
@@ -21,10 +24,18 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.Locale
 
 // Motor nativo de extracción y descarga basado en yt-dlp (github.com/yt-dlp/yt-dlp) + FFmpeg
 object SnowDownloaderEngine {
+  private const val TAG = "SnowDownloaderEngine"
+  private const val PREFS_NAME = "snow_beats_storage_prefs"
+  private const val KEY_SAF_TREE_URI = "saf_tree_uri"
+  const val SAF_TREE_REQUEST_CODE = 5092
+  const val LEGACY_STORAGE_REQUEST_CODE = 5091
+
   @Volatile
   private var initialized = false
   private val initLock = Any()
@@ -51,14 +62,47 @@ object SnowDownloaderEngine {
     synchronized(initLock) {
       if (initialized) return
       val appCtx = context.applicationContext
-      YoutubeDL.getInstance().init(appCtx)
+      val nativeLibDir = appCtx.applicationInfo.nativeLibraryDir
+      val pythonLib = File(nativeLibDir, "libpython.zip.so")
+
+      try {
+        YoutubeDL.getInstance().init(appCtx)
+      } catch (e: Exception) {
+        val causeChain = buildCauseChain(e)
+        Log.e(TAG, "Error inicializando YoutubeDL (nativeLibDir=$nativeLibDir): $causeChain", e)
+        if (!pythonLib.exists()) {
+          throw IllegalStateException(
+            "Faltan librerías nativas de yt-dlp (libpython.zip.so no extraída en APK). " +
+              "Ejecuta 'npx expo prebuild --clean' y 'npx expo run:android' para aplicar useLegacyPackaging=true.",
+            e
+          )
+        }
+        throw IllegalStateException("No se pudo inicializar yt-dlp: $causeChain", e)
+      }
+
       try {
         FFmpeg.getInstance().init(appCtx)
-      } catch (_: Exception) {
+      } catch (e: Exception) {
         // FFmpeg es opcional si solo se descargan flujos progresivos directos
+        Log.w(TAG, "FFmpeg no disponible: ${buildCauseChain(e)}")
       }
       initialized = true
     }
+  }
+
+  private fun buildCauseChain(throwable: Throwable): String {
+    val parts = mutableListOf<String>()
+    var cur: Throwable? = throwable
+    var depth = 0
+    while (cur != null && depth < 6) {
+      val msg = cur.message?.trim()
+      if (!msg.isNullOrEmpty() && !parts.contains(msg)) {
+        parts.add(msg)
+      }
+      cur = cur.cause
+      depth++
+    }
+    return if (parts.isEmpty()) throwable.javaClass.simpleName else parts.joinToString(" -> ")
   }
 
   fun isNetworkAvailable(context: Context): Boolean {
@@ -77,9 +121,39 @@ object SnowDownloaderEngine {
     }
   }
 
+  // Obtiene la URI persistida de SAF si el usuario concedió acceso a una carpeta
+  fun getPersistedSafTreeUri(context: Context): Uri? {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val saved = prefs.getString(KEY_SAF_TREE_URI, null) ?: return null
+    val uri = try { Uri.parse(saved) } catch (_: Exception) { return null }
+    val stillGranted = context.contentResolver.persistedUriPermissions.any { perm ->
+      perm.uri == uri && perm.isWritePermission
+    }
+    return if (stillGranted) uri else null
+  }
+
+  // Guarda el permiso persistente devuelto por ACTION_OPEN_DOCUMENT_TREE (compatible con HyperOS)
+  fun handleSafResult(context: Context, resultCode: Int, data: Intent?): Boolean {
+    if (resultCode != Activity.RESULT_OK) return false
+    val treeUri = data?.data ?: return false
+    return try {
+      val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+      context.contentResolver.takePersistableUriPermission(treeUri, flags)
+      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_SAF_TREE_URI, treeUri.toString())
+        .apply()
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "No se pudo persistir permiso SAF: ${e.message}", e)
+      false
+    }
+  }
+
   fun hasStorageWritePermission(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      Environment.isExternalStorageManager()
+      // Acepta Acceso a todos los archivos O carpeta autorizada vía SAF (no bloqueado en HyperOS)
+      Environment.isExternalStorageManager() || getPersistedSafTreeUri(context) != null
     } else {
       ContextCompat.checkSelfPermission(
         context,
@@ -88,25 +162,32 @@ object SnowDownloaderEngine {
     }
   }
 
-  fun requestStorageWritePermission(activity: Activity?): Boolean {
+  // Lanza selector de carpeta SAF en Android 11+ (evita el bloqueo de Ajustes Restringidos en HyperOS)
+  fun launchStoragePermissionRequest(activity: Activity?): Boolean {
     if (activity == null) return false
     if (hasStorageWritePermission(activity)) return true
 
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       try {
-        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-          data = Uri.parse("package:${activity.packageName}")
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+          addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+              Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+              Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+              Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+          )
+          // Sugiere iniciar en Music/ para que el usuario pueda confirmar o crear "Snow beats" en 1 toque
+          val initialUri = DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            "primary:Music"
+          )
+          putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
         }
-        activity.startActivity(intent)
+        activity.startActivityForResult(intent, SAF_TREE_REQUEST_CODE)
         true
-      } catch (_: Exception) {
-        try {
-          val fallback = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-          activity.startActivity(fallback)
-          true
-        } catch (_: Exception) {
-          false
-        }
+      } catch (e: Exception) {
+        Log.e(TAG, "Error lanzando ACTION_OPEN_DOCUMENT_TREE: ${e.message}", e)
+        false
       }
     } else {
       ActivityCompat.requestPermissions(
@@ -115,15 +196,14 @@ object SnowDownloaderEngine {
           Manifest.permission.WRITE_EXTERNAL_STORAGE,
           Manifest.permission.READ_EXTERNAL_STORAGE
         ),
-        5091
+        LEGACY_STORAGE_REQUEST_CODE
       )
       true
     }
   }
 
-  // Convierte una ruta amigable ("Almacenamiento interno/Snow beats/...") en carpeta real en Android
-  fun resolveTargetDirectory(displayPath: String): File {
-    val root = Environment.getExternalStorageDirectory()
+  // Convierte una ruta amigable ("Almacenamiento interno/Snow beats/...") en segmentos relativos limpios
+  private fun cleanRelativePath(displayPath: String): String {
     val cleaned = displayPath
       .trim()
       .replace("\\", "/")
@@ -132,12 +212,14 @@ object SnowDownloaderEngine {
       .removePrefix("/storage/emulated/0/")
       .removePrefix("/")
       .replace("..", "")
+      .trim('/')
+    return cleaned.ifBlank { "Snow beats/Download" }
+  }
 
-    return if (cleaned.isBlank()) {
-      File(root, "Snow beats/Download")
-    } else {
-      File(root, cleaned)
-    }
+  // Convierte una ruta amigable ("Almacenamiento interno/Snow beats/...") en carpeta real en Android
+  fun resolveTargetDirectory(displayPath: String): File {
+    val root = Environment.getExternalStorageDirectory()
+    return File(root, cleanRelativePath(displayPath))
   }
 
   private fun getAvailableSpaceBytes(dir: File): Long {
@@ -551,7 +633,7 @@ object SnowDownloaderEngine {
     )
   )
 
-  // Ejecuta una descarga real mediante yt-dlp reportando progreso en vivo
+  // Ejecuta una descarga real mediante yt-dlp en caché temporal y exporta al destino (Directo, SAF o MediaStore)
   fun downloadMedia(
     context: Context,
     taskId: String,
@@ -568,7 +650,7 @@ object SnowDownloaderEngine {
       return mapOf(
         "ok" to false,
         "errorCode" to "PERMISSION_DENIED",
-        "errorMessage" to "Permiso de almacenamiento no concedido. Habilítalo para guardar archivos."
+        "errorMessage" to "Permiso de almacenamiento no concedido. Selecciona tu carpeta de descargas para guardar archivos."
       )
     }
 
@@ -580,17 +662,8 @@ object SnowDownloaderEngine {
       )
     }
 
-    val destDir = resolveTargetDirectory(targetDisplayPath)
-    if (!destDir.exists() && !destDir.mkdirs()) {
-      return mapOf(
-        "ok" to false,
-        "errorCode" to "PERMISSION_DENIED",
-        "errorMessage" to "No se pudo crear la carpeta de destino (${destDir.absolutePath}). Revisa permisos."
-      )
-    }
-
     // Verifica al menos 25 MB libres antes de iniciar
-    val freeBytes = getAvailableSpaceBytes(destDir)
+    val freeBytes = getAvailableSpaceBytes(context.cacheDir)
     if (freeBytes < 25L * 1024L * 1024L) {
       return mapOf(
         "ok" to false,
@@ -599,17 +672,22 @@ object SnowDownloaderEngine {
       )
     }
 
+    val safeTaskDir = taskId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    val tempDir = File(File(context.cacheDir, "snow_dl_tmp"), safeTaskDir).apply {
+      if (exists()) deleteRecursively()
+      mkdirs()
+    }
+
     return try {
       ensureInitialized(context)
 
-      val beforeFiles = destDir.listFiles()?.map { it.absolutePath }?.toSet() ?: emptySet()
       val request = YoutubeDLRequest(url).apply {
         addOption("--no-playlist")
         addOption("--no-warnings")
         addOption("--no-check-certificates")
         addOption("--newline")
         addOption("--restrict-filenames")
-        addOption("-o", File(destDir, "%(title).110B.%(ext)s").absolutePath)
+        addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
 
         if (mediaType == "audio") {
           addOption("-f", formatId.ifBlank { "bestaudio/best" })
@@ -628,26 +706,44 @@ object SnowDownloaderEngine {
         onProgress(progress, etaInSeconds, line)
       }
 
-      // Detecta el archivo nuevo generado y notifica a MediaStore para que aparezca en Snow Beats
-      val newFiles = destDir.listFiles()
-        ?.filter { !beforeFiles.contains(it.absolutePath) && it.isFile }
-        ?.sortedByDescending { it.lastModified() }
-        ?: emptyList()
+      val downloadedFile = tempDir.listFiles()
+        ?.filter { f ->
+          f.isFile &&
+            !f.name.endsWith(".part") &&
+            !f.name.endsWith(".ytdl") &&
+            !f.name.endsWith(".temp") &&
+            !f.name.endsWith(".jpg") &&
+            !f.name.endsWith(".jpeg") &&
+            !f.name.endsWith(".webp") &&
+            !f.name.endsWith(".png")
+        }
+        ?.sortedByDescending { it.length() }
+        ?.firstOrNull()
+        ?: return mapOf(
+          "ok" to false,
+          "errorCode" to "EMPTY_OUTPUT",
+          "errorMessage" to "yt-dlp finalizó pero no generó el archivo de salida."
+        )
 
-      val savedFile = newFiles.firstOrNull()
-      if (savedFile != null) {
-        MediaScannerConnection.scanFile(
-          context.applicationContext,
-          arrayOf(savedFile.absolutePath),
-          null,
-          null
+      val exported = exportDownloadedFile(
+        context = context,
+        sourceFile = downloadedFile,
+        mediaType = mediaType,
+        targetDisplayPath = targetDisplayPath
+      )
+
+      if (exported == null) {
+        return mapOf(
+          "ok" to false,
+          "errorCode" to "PERMISSION_DENIED",
+          "errorMessage" to "No se pudo guardar el archivo en la carpeta seleccionada. Revisa permisos."
         )
       }
 
       mapOf(
         "ok" to true,
-        "filePath" to (savedFile?.absolutePath ?: destDir.absolutePath),
-        "fileName" to (savedFile?.name ?: "")
+        "filePath" to exported.first,
+        "fileName" to exported.second
       )
     } catch (e: Exception) {
       val (code, msg) = classifyError(e, context)
@@ -656,6 +752,247 @@ object SnowDownloaderEngine {
         "errorCode" to code,
         "errorMessage" to msg
       )
+    } finally {
+      try {
+        tempDir.deleteRecursively()
+      } catch (_: Exception) { }
+    }
+  }
+
+  private fun mimeTypeForFile(fileName: String, mediaType: String): String {
+    val ext = fileName.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+      "mp3" -> "audio/mpeg"
+      "m4a" -> "audio/mp4"
+      "opus" -> "audio/opus"
+      "ogg" -> "audio/ogg"
+      "flac" -> "audio/flac"
+      "wav" -> "audio/wav"
+      "mp4" -> "video/mp4"
+      "mkv" -> "video/x-matroska"
+      "webm" -> if (mediaType == "audio") "audio/webm" else "video/webm"
+      else -> if (mediaType == "audio") "audio/mpeg" else "video/mp4"
+    }
+  }
+
+  // Exporta el archivo desde caché temporal usando acceso directo, carpeta SAF (HyperOS) o MediaStore
+  private fun exportDownloadedFile(
+    context: Context,
+    sourceFile: File,
+    mediaType: String,
+    targetDisplayPath: String
+  ): Pair<String, String>? {
+    val canUseDirect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      Environment.isExternalStorageManager()
+    } else {
+      ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
+      ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    // 1. Acceso directo al sistema de archivos si All Files Access (o Android <=10) está concedido
+    if (canUseDirect) {
+      try {
+        val destDir = resolveTargetDirectory(targetDisplayPath)
+        if (destDir.exists() || destDir.mkdirs()) {
+          val destFile = resolveUniqueFile(destDir, sourceFile.name)
+          FileInputStream(sourceFile).use { input ->
+            FileOutputStream(destFile).use { output -> input.copyTo(output) }
+          }
+          MediaScannerConnection.scanFile(
+            context.applicationContext,
+            arrayOf(destFile.absolutePath),
+            arrayOf(mimeTypeForFile(destFile.name, mediaType)),
+            null
+          )
+          return Pair(destFile.absolutePath, destFile.name)
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Fallo escritura directa, intentando SAF/MediaStore: ${e.message}")
+      }
+    }
+
+    // 2. Escritura vía carpeta SAF autorizada (funciona sin bloqueos en HyperOS y Android 11–15)
+    val safTreeUri = getPersistedSafTreeUri(context)
+    if (safTreeUri != null) {
+      val safResult = exportToSafTree(context, safTreeUri, sourceFile, mediaType, targetDisplayPath)
+      if (safResult != null) return safResult
+    }
+
+    // 3. Respaldo oficial vía MediaStore en Android 10+ (nunca requiere MANAGE_EXTERNAL_STORAGE)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      return exportToMediaStore(context, sourceFile, mediaType)
+    }
+
+    return null
+  }
+
+  private fun resolveUniqueFile(dir: File, originalName: String): File {
+    var candidate = File(dir, originalName)
+    if (!candidate.exists()) return candidate
+    val base = originalName.substringBeforeLast('.', originalName)
+    val ext = originalName.substringAfterLast('.', "")
+    var index = 1
+    while (candidate.exists() && index < 500) {
+      val nextName = if (ext.isNotEmpty()) "${base}_($index).$ext" else "${base}_($index)"
+      candidate = File(dir, nextName)
+      index++
+    }
+    return candidate
+  }
+
+  private fun exportToSafTree(
+    context: Context,
+    treeUri: Uri,
+    sourceFile: File,
+    mediaType: String,
+    targetDisplayPath: String
+  ): Pair<String, String>? {
+    return try {
+      val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+      val treeTail = rootDocId.substringAfterLast(':').substringAfterLast('/').trim()
+      val rawSegments = cleanRelativePath(targetDisplayPath)
+        .split('/')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
+      // Evita duplicar carpetas si el usuario ya eligió la carpeta raíz (ej. "Snow beats" o "Snow beats audio")
+      val matchIdx = rawSegments.indexOfLast { it.equals(treeTail, ignoreCase = true) }
+      val subSegments = if (matchIdx >= 0) {
+        rawSegments.drop(matchIdx + 1)
+      } else {
+        // Si el usuario eligió una carpeta genérica (ej. Music), crea una subcarpeta ordenada
+        listOf(if (mediaType == "audio") "Snow beats audio" else "Snow beats video")
+      }
+
+      var currentParentDocId = rootDocId
+      for (seg in subSegments) {
+        val nextId = findOrCreateSafSubdir(context, treeUri, currentParentDocId, seg)
+        if (nextId != null) {
+          currentParentDocId = nextId
+        }
+      }
+
+      val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, currentParentDocId)
+      val mime = mimeTypeForFile(sourceFile.name, mediaType)
+      val createdUri = DocumentsContract.createDocument(
+        context.contentResolver,
+        parentUri,
+        mime,
+        sourceFile.name
+      ) ?: return null
+
+      context.contentResolver.openOutputStream(createdUri)?.use { output ->
+        FileInputStream(sourceFile).use { input -> input.copyTo(output) }
+      } ?: return null
+
+      // Notifica a MediaStore para que el audio/video aparezca al instante en la biblioteca local
+      val createdDocId = try { DocumentsContract.getDocumentId(createdUri) } catch (_: Exception) { null }
+      if (createdDocId != null && createdDocId.startsWith("primary:")) {
+        val realPath = "/storage/emulated/0/" + createdDocId.removePrefix("primary:")
+        MediaScannerConnection.scanFile(
+          context.applicationContext,
+          arrayOf(realPath),
+          arrayOf(mime),
+          null
+        )
+        return Pair(realPath, sourceFile.name)
+      }
+
+      Pair(createdUri.toString(), sourceFile.name)
+    } catch (e: Exception) {
+      Log.w(TAG, "Error exportando a SAF: ${e.message}", e)
+      null
+    }
+  }
+
+  private fun findOrCreateSafSubdir(
+    context: Context,
+    treeUri: Uri,
+    parentDocId: String,
+    folderName: String
+  ): String? {
+    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+    try {
+      context.contentResolver.query(
+        childrenUri,
+        arrayOf(
+          DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+          DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+          DocumentsContract.Document.COLUMN_MIME_TYPE
+        ),
+        null,
+        null,
+        null
+      )?.use { cursor ->
+        while (cursor.moveToNext()) {
+          val docId = cursor.getString(0)
+          val name = cursor.getString(1)
+          val mime = cursor.getString(2)
+          if (mime == DocumentsContract.Document.MIME_TYPE_DIR &&
+            name.equals(folderName, ignoreCase = true)
+          ) {
+            return docId
+          }
+        }
+      }
+    } catch (_: Exception) { }
+
+    return try {
+      val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
+      val createdUri = DocumentsContract.createDocument(
+        context.contentResolver,
+        parentUri,
+        DocumentsContract.Document.MIME_TYPE_DIR,
+        folderName
+      )
+      createdUri?.let { DocumentsContract.getDocumentId(it) }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun exportToMediaStore(
+    context: Context,
+    sourceFile: File,
+    mediaType: String
+  ): Pair<String, String>? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    return try {
+      val mime = mimeTypeForFile(sourceFile.name, mediaType)
+      val collection = if (mediaType == "audio") {
+        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+      } else {
+        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+      }
+      val relativeDir = if (mediaType == "audio") {
+        "${Environment.DIRECTORY_MUSIC}/Snow beats/Snow beats audio"
+      } else {
+        "${Environment.DIRECTORY_MOVIES}/Snow beats/Snow beats video"
+      }
+
+      val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
+        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+        put(MediaStore.MediaColumns.RELATIVE_PATH, relativeDir)
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+      }
+
+      val insertedUri = context.contentResolver.insert(collection, values) ?: return null
+      context.contentResolver.openOutputStream(insertedUri)?.use { output ->
+        FileInputStream(sourceFile).use { input -> input.copyTo(output) }
+      } ?: return null
+
+      val doneValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.IS_PENDING, 0)
+      }
+      context.contentResolver.update(insertedUri, doneValues, null, null)
+
+      Pair("$relativeDir/${sourceFile.name}", sourceFile.name)
+    } catch (e: Exception) {
+      Log.e(TAG, "Error exportando a MediaStore: ${e.message}", e)
+      null
     }
   }
 
@@ -669,8 +1006,12 @@ object SnowDownloaderEngine {
 
   // Clasifica cualquier error de yt-dlp / Android en un motivo claro para el usuario
   private fun classifyError(e: Exception, context: Context): Pair<String, String> {
-    val raw = (e.message ?: e.toString()).lowercase(Locale.US)
+    val fullMsg = buildCauseChain(e)
+    val raw = fullMsg.lowercase(Locale.US)
     return when {
+      raw.contains("libpython.zip.so") || raw.contains("uselegacypackaging") ->
+        Pair("INIT_FAILED", fullMsg)
+
       raw.contains("canceled") || raw.contains("cancelled") || raw.contains("destroyed") || raw.contains("interrupted") ->
         Pair("CANCELLED", "Descarga cancelada por el usuario.")
 
@@ -706,7 +1047,7 @@ object SnowDownloaderEngine {
         Pair("UNSUPPORTED_URL", "URL no soportada por yt-dlp.")
 
       else ->
-        Pair("UNKNOWN", "Error durante el proceso: ${(e.message ?: "desconocido").take(140)}")
+        Pair("UNKNOWN", "Error durante el proceso: ${fullMsg.take(220)}")
     }
   }
 }

@@ -26,6 +26,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.os.bundleOf
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayOutputStream
@@ -41,6 +42,8 @@ import kotlin.math.min
 import kotlin.math.sin
 
 class SnowMetadataModule : Module() {
+  private var pendingStoragePermPromise: Promise? = null
+
   override fun definition() = ModuleDefinition {
     Name("SnowMetadata")
 
@@ -60,8 +63,23 @@ class SnowMetadataModule : Module() {
       }
     }
 
+    OnActivityResult { _, payload ->
+      if (payload.requestCode == SnowDownloaderEngine.SAF_TREE_REQUEST_CODE) {
+        val ctx = appContext.reactContext
+        val granted = if (ctx != null) {
+          SnowDownloaderEngine.handleSafResult(ctx, payload.resultCode, payload.data)
+        } else {
+          false
+        }
+        pendingStoragePermPromise?.resolve(granted)
+        pendingStoragePermPromise = null
+      }
+    }
+
     OnDestroy {
       SnowMediaNotificationService.actionListener = null
+      pendingStoragePermPromise?.resolve(false)
+      pendingStoragePermPromise = null
     }
 
     // Extrae etiquetas ID3, guarda la portada en caché y devuelve el color dominante hex
@@ -224,9 +242,29 @@ class SnowMetadataModule : Module() {
       SnowDownloaderEngine.hasStorageWritePermission(ctx)
     }
 
-    // Solicita permiso de almacenamiento al usuario (All Files Access en Android 11+ / WRITE_EXTERNAL_STORAGE en <=10)
-    AsyncFunction("requestStorageWritePermission") {
-      SnowDownloaderEngine.requestStorageWritePermission(appContext.currentActivity)
+    // Solicita permiso de carpeta vía SAF en Android 11+ (sin bloqueos en HyperOS) o WRITE_EXTERNAL_STORAGE en <=10
+    AsyncFunction("requestStorageWritePermission") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      if (SnowDownloaderEngine.hasStorageWritePermission(activity)) {
+        promise.resolve(true)
+        return@AsyncFunction
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        pendingStoragePermPromise?.resolve(false)
+        pendingStoragePermPromise = promise
+        val launched = SnowDownloaderEngine.launchStoragePermissionRequest(activity)
+        if (!launched) {
+          pendingStoragePermPromise = null
+          promise.resolve(false)
+        }
+      } else {
+        val launched = SnowDownloaderEngine.launchStoragePermissionRequest(activity)
+        promise.resolve(launched)
+      }
     }
 
     // Extrae información, streaming y formatos ordenados (o lista de reproducción) con yt-dlp
