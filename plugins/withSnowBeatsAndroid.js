@@ -48,14 +48,19 @@ module.exports = function withSnowBeatsAndroid(config) {
         return mod;
     });
 
-    // 3. Fuerza packaging { jniLibs { useLegacyPackaging = true } } tanto en Groovy (build.gradle) como en Kotlin DSL (build.gradle.kts)
+    // 3. Solo inyecta packaging { jniLibs { useLegacyPackaging = true } } si el template de Expo no lee ya expo.useLegacyPackaging
     config = withAppBuildGradle(config, (mod) => {
         let contents = mod.modResults.contents;
 
-        if (/useLegacyPackaging\s*=?\s*[^\n]+/.test(contents)) {
+        // Expo SDK 58 ya lee findProperty('expo.useLegacyPackaging') desde gradle.properties (configurado arriba en true)
+        if (contents.includes('expo.useLegacyPackaging')) {
+            return mod;
+        }
+
+        if (/^\s*useLegacyPackaging\s*=?\s*[^\n]+$/m.test(contents)) {
             contents = contents.replace(
-                /useLegacyPackaging\s*=?\s*[^\n]+/g,
-                'useLegacyPackaging = true'
+                /^(\s*)useLegacyPackaging\s*=?\s*[^\n]+$/m,
+                '$1useLegacyPackaging = true'
             );
         } else if (/jniLibs\s*\{/.test(contents)) {
             contents = contents.replace(
