@@ -70,6 +70,7 @@ export interface ExtractedMediaInfo {
     errorMessage?: string;
     isPlaylist?: boolean;
     isAudioOnly?: boolean;
+    extractionSource?: 'yt-dlp' | 'embed' | 'webview';
     title?: string;
     uploader?: string;
     domain?: string;
@@ -77,7 +78,9 @@ export interface ExtractedMediaInfo {
     thumbnail?: string | null;
     duration?: number;
     url?: string;
+    directStreamUrl?: string | null;
     previewStreamUrl?: string | null;
+    previewHeaders?: Record<string, string>;
     entries?: PlaylistDownloadEntry[];
     audioFormats?: DownloadFormatOption[];
     videoFormats?: DownloadFormatOption[];
@@ -90,6 +93,8 @@ export interface DownloadMediaOptions {
     mediaType: 'audio' | 'video';
     audioQuality?: string;
     targetPath: string;
+    headers?: Record<string, string>;
+    directStreamUrl?: string | null;
 }
 
 export interface DownloadMediaResult {

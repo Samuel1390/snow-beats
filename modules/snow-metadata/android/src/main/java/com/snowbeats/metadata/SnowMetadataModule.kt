@@ -290,6 +290,17 @@ class SnowMetadataModule : Module() {
       val mediaType = (options["mediaType"] as? String) ?: "audio"
       val audioQuality = options["audioQuality"] as? String
       val targetPath = (options["targetPath"] as? String) ?: "Almacenamiento interno/Snow beats/Download"
+      val directStreamUrl = options["directStreamUrl"] as? String
+      @Suppress("UNCHECKED_CAST")
+      val rawHeaders = options["headers"] as? Map<*, *>
+      val parsedHeaders = rawHeaders
+        ?.entries
+        ?.mapNotNull { (k, v) ->
+          val ks = k?.toString()?.trim()
+          val vs = v?.toString()?.trim()
+          if (!ks.isNullOrEmpty() && !vs.isNullOrEmpty()) ks to vs else null
+        }
+        ?.toMap()
 
       var lastEmitMs = 0L
       SnowDownloaderEngine.downloadMedia(
@@ -299,7 +310,9 @@ class SnowMetadataModule : Module() {
         formatId = formatId,
         mediaType = mediaType,
         audioQuality = audioQuality,
-        targetDisplayPath = targetPath
+        targetDisplayPath = targetPath,
+        headers = parsedHeaders,
+        directStreamUrl = directStreamUrl
       ) { progress, etaInSeconds, line ->
         val now = System.currentTimeMillis()
         if (now - lastEmitMs >= 220L || progress >= 99.5f) {

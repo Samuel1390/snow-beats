@@ -1,0 +1,2232 @@
+```python
+import os, zipfile, glob
+
+# Find the zip file
+zips = glob.glob("*.zip") + glob.glob("/mnt/data/*.zip")
+print("Found zips:", zips)
+
+if zips:
+    zp = zips[0]
+    with zipfile.ZipFile(zp, 'r') as z:
+        names = z.namelist()
+        root = names[0].split('/')[0]
+        print("Root:", root)
+        
+        target_files = [
+            f"{root}/AGENTS.md",
+            f"{root}/package.json",
+            f"{root}/modules/snow-metadata/android/build.gradle",
+            f"{root}/modules/snow-metadata/index.ts",
+            f"{root}/src/storage/downloadSettings.ts",
+            f"{root}/plugins/withSnowBeatsAndroid.js",
+        ]
+        for tf in target_files:
+            if tf in names:
+                print("="*60)
+                print("FILE:", tf)
+                print(z.read(tf).decode('utf-8', errors='replace'))
+
+
+```
+
+```text
+Found zips: []
+
+
+```
+
+```python
+import os, glob
+print("CWD:", os.getcwd())
+print("Files in CWD:", os.listdir("."))
+for d in ["/mnt", "/tmp", "/content", "/home", "/"]:
+    if os.path.exists(d):
+        try:
+            print(d, ":", os.listdir(d)[:20])
+        except Exception as e:
+            print(d, "err:", e)
+
+
+```
+
+```text
+CWD: /home/bard
+Files in CWD: ['samuel1390']
+/mnt : ['data']
+/tmp : ['matplotlib_config_dir']
+/home : ['bard']
+/ : ['usr', 'var', 'bin', 'lib64', 'lib', 'sbin', 'protoc-29.1-linux-x86_64.zip', 'requirements.txt', 'mnt', 'root', 'run', 'tmp', 'boot', 'dev', 'etc', 'home', 'media', 'opt', 'proc', 'sys']
+
+
+```
+
+```python
+import os
+print("samuel1390:", os.listdir("samuel1390") if os.path.isdir("samuel1390") else "file")
+print("/mnt/data:", os.listdir("/mnt/data") if os.path.exists("/mnt/data") else "none")
+
+
+```
+
+```text
+samuel1390: ['snow-beats']
+/mnt/data: ['samuel1390']
+
+
+```
+
+```python
+import os
+
+base = "samuel1390/snow-beats"
+print("Root files:", os.listdir(base))
+
+files_to_read = [
+    "AGENTS.md",
+    "package.json",
+    "modules/snow-metadata/android/build.gradle",
+    "modules/snow-metadata/index.ts",
+    "src/storage/downloadSettings.ts",
+    "plugins/withSnowBeatsAndroid.js",
+]
+
+for f in files_to_read:
+    p = os.path.join(base, f)
+    if os.path.exists(p):
+        print("="*60)
+        print("FILE:", f)
+        with open(p, "r", encoding="utf-8", errors="replace") as fp:
+            print(fp.read())
+
+
+```
+
+```text
+Traceback (most recent call last):
+  File "<xbox-string>", line 4, in <module>
+    print("Root files:", os.listdir(base))
+NotADirectoryError: [Errno 20] Not a directory: 'samuel1390/snow-beats'
+
+
+```
+
+```python
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    names = z.namelist()
+    root = names[0].split('/')[0]
+    print("Root:", root)
+    
+    target_files = [
+        f"{root}/AGENTS.md",
+        f"{root}/package.json",
+        f"{root}/modules/snow-metadata/android/build.gradle",
+        f"{root}/modules/snow-metadata/index.ts",
+        f"{root}/src/storage/downloadSettings.ts",
+        f"{root}/plugins/withSnowBeatsAndroid.js",
+    ]
+    for tf in target_files:
+        if tf in names:
+            print("="*60)
+            print("FILE:", tf)
+            print(z.read(tf).decode('utf-8', errors='replace'))
+
+
+```
+
+```text
+Root: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4
+============================================================
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/AGENTS.md
+This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+
+## Expo has changed — do not trust your training data
+
+Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+
+1. Read the major version of the `expo` package in `package.json`.
+2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
+3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+
+## Commands
+
+Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
+
+```bash
+npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
+npx expo start              # start the dev server
+npx expo lint               # lint
+npx tsc --noEmit            # typecheck
+npx expo-doctor             # diagnose dependency and config issues
+npx expo install --fix      # fix incompatible package versions
+
+```
+
+Run lint and typecheck before declaring any task done.
+
+## Navigation & Routing
+
+* Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
+* Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
+* Docs: https://docs.expo.dev/router/introduction.md
+
+## Building with EAS
+
+Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
+Docs: https://docs.expo.dev/eas/index.md
+
+## Rules
+
+* If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
+* Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+* Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+============================================================
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/package.json
+{
+"name": "snow-beats",
+"version": "1.0.0",
+"main": "index.ts",
+"dependencies": {
+"@expo/metro-runtime": "58.0.17",
+"@react-native-community/slider": "5.2.1",
+"expo": "~58.0.25",
+"expo-audio": "~58.0.12",
+"expo-image-picker": "~58.0.10",
+"expo-linear-gradient": "~58.0.4",
+"expo-media-library": "~58.0.14",
+"expo-sharing": "~58.0.23",
+"expo-sqlite": "~58.0.17",
+"expo-status-bar": "~58.0.5",
+"expo-system-ui": "~58.0.7",
+"expo-video": "~58.0.14",
+"expo-video-thumbnails": "~58.0.3",
+"lucide-react-native": "^1.73.0",
+"react": "19.3.0",
+"react-dom": "19.3.0",
+"react-native": "0.88.1",
+"react-native-safe-area-context": "~5.11.1",
+"react-native-svg": "15.16.0",
+"react-native-web": "0.21.4"
+},
+"devDependencies": {
+"@types/react": "~19.3.0",
+"typescript": "~6.0.3"
+},
+"scripts": {
+"dev": "expo start --web --port 3000",
+"start": "expo start",
+"android": "expo run:android",
+"ios": "expo run:ios",
+"web": "expo start --web"
+},
+"private": true
+}
+
+============================================================
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/modules/snow-metadata/android/build.gradle
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.snowbeats.metadata'
+version = '0.2.0'
+
+repositories {
+mavenCentral()
+}
+
+android {
+namespace 'com.snowbeats.metadata'
+defaultConfig {
+versionCode 2
+versionName '0.2.0'
+}
+}
+
+dependencies {
+// Notificación multimedia clásica MediaStyle y utilidades AndroidX
+implementation 'androidx.media:media:1.7.0'
+implementation 'androidx.core:core-ktx:1.15.0'
+
+# // Motor nativo yt-dlp + FFmpeg para descargas de YouTube, TikTok, Instagram, Facebook y X
+implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
+implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1'
+}
+
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/modules/snow-metadata/index.ts
+import { EventSubscription, requireOptionalNativeModule } from 'expo-modules-core';
+
+export interface NativeTrackTags {
+title?: string | null;
+artist?: string | null;
+album?: string | null;
+artworkUri?: string | null;
+dominantColor?: string | null;
+}
+
+export interface RenderShareCardOptions {
+mode: 'song' | 'lyrics';
+title: string;
+artist: string;
+artworkUri?: string | null;
+logoUri?: string | null;
+bgImageUri?: string | null;
+bgColor: string;
+bgColorBottom: string;
+textColor: string;
+mutedColor: string;
+fontStyle: 'classic' | 'wide' | 'narrow' | 'italic';
+textAlign: 'left' | 'center' | 'right';
+uppercase: boolean;
+lines: string[];
+}
+
+export interface MediaNotificationPayload {
+title: string;
+artist: string;
+album?: string;
+artworkUri?: string | null;
+isPlaying: boolean;
+isFavorite: boolean;
+positionMs: number;
+durationMs: number;
+speed?: number;
+}
+
+export interface MediaActionEvent {
+action: 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'favorite' | 'close' | 'seek';
+positionSec?: number;
+}
+
+export interface DownloadFormatOption {
+id: string;
+formatId: string;
+mediaType: 'audio' | 'video';
+label: string;
+ext: string;
+qualityRank: number;
+audioQuality?: string;
+height?: number;
+filesize: number;
+}
+
+export interface PlaylistDownloadEntry {
+id: string;
+index: number;
+title: string;
+artist: string;
+duration: number;
+thumbnail?: string | null;
+url: string;
+}
+
+export interface ExtractedMediaInfo {
+ok: boolean;
+errorCode?: string;
+errorMessage?: string;
+isPlaylist?: boolean;
+isAudioOnly?: boolean;
+title?: string;
+uploader?: string;
+domain?: string;
+platform?: string;
+thumbnail?: string | null;
+duration?: number;
+url?: string;
+previewStreamUrl?: string | null;
+entries?: PlaylistDownloadEntry[];
+audioFormats?: DownloadFormatOption[];
+videoFormats?: DownloadFormatOption[];
+}
+
+export interface DownloadMediaOptions {
+taskId: string;
+url: string;
+formatId: string;
+mediaType: 'audio' | 'video';
+audioQuality?: string;
+targetPath: string;
+}
+
+export interface DownloadMediaResult {
+ok: boolean;
+filePath?: string;
+fileName?: string;
+errorCode?: string;
+errorMessage?: string;
+}
+
+export interface DownloadProgressEvent {
+taskId: string;
+progress: number;
+etaSeconds: number;
+line?: string;
+}
+
+interface SnowMetadataNativeModule {
+readTrackTags(uri: string, trackId: string): Promise<NativeTrackTags | null>;
+readTrackLyrics?: (uri: string) => Promise<string | null>;
+renderShareCard?: (options: RenderShareCardOptions) => Promise<string | null>;
+requestNotificationPermission?: () => Promise;
+updateMediaNotification?: (payload: MediaNotificationPayload) => Promise;
+dismissMediaNotification?: () => Promise;
+sendEmailWithAttachments?: (
+to: string,
+subject: string,
+body: string,
+imageUris: string[]
+) => Promise;
+hasStorageWritePermission?: () => Promise;
+requestStorageWritePermission?: () => Promise;
+extractMediaInfo?: (url: string) => Promise;
+downloadMedia?: (options: DownloadMediaOptions) => Promise;
+cancelDownload?: (taskId: string) => Promise;
+addListener?: (eventName: string, listener: (event: any) => void) => EventSubscription;
+}
+
+const SnowMetadata = requireOptionalNativeModule('SnowMetadata');
+
+// Llama al módulo Kotlin para leer ID3 y carátula de una pista
+export async function readTrackTags(
+uri: string,
+trackId: string
+): Promise<NativeTrackTags | null> {
+if (!SnowMetadata || typeof SnowMetadata.readTrackTags !== 'function') {
+return null;
+}
+return SnowMetadata.readTrackTags(uri, trackId);
+}
+
+// Lee letras incrustadas (ID3/MP4/FLAC/OGG) o archivo .lrc hermano desde Kotlin
+export async function readTrackLyrics(uri: string): Promise<string | null> {
+if (!SnowMetadata || typeof SnowMetadata.readTrackLyrics !== 'function') {
+return null;
+}
+return SnowMetadata.readTrackLyrics(uri);
+}
+
+// Renderiza la tarjeta PNG de canción o letra en alta resolución en Android
+export async function renderShareCard(
+options: RenderShareCardOptions
+): Promise<string | null> {
+if (!SnowMetadata || typeof SnowMetadata.renderShareCard !== 'function') {
+return null;
+}
+return SnowMetadata.renderShareCard(options);
+}
+
+// Solicita permiso POST_NOTIFICATIONS en Android 13+
+export async function requestNotificationPermission(): Promise {
+if (!SnowMetadata || typeof SnowMetadata.requestNotificationPermission !== 'function') {
+return false;
+}
+return SnowMetadata.requestNotificationPermission();
+}
+
+// Actualiza la notificación flotante clásica en la barra de notificaciones
+export async function updateMediaNotification(
+payload: MediaNotificationPayload
+): Promise {
+if (!SnowMetadata || typeof SnowMetadata.updateMediaNotification !== 'function') {
+return false;
+}
+return SnowMetadata.updateMediaNotification(payload);
+}
+
+// Cierra la notificación flotante multimedia
+export async function dismissMediaNotification(): Promise {
+if (!SnowMetadata || typeof SnowMetadata.dismissMediaNotification !== 'function') {
+return false;
+}
+return SnowMetadata.dismissMediaNotification();
+}
+
+// Escucha botones y barra de progreso desde el control multimedia flotante
+export function addMediaActionListener(
+listener: (event: MediaActionEvent) => void
+): EventSubscription | null {
+if (!SnowMetadata || typeof SnowMetadata.addListener !== 'function') {
+return null;
+}
+return SnowMetadata.addListener('onMediaAction', listener);
+}
+
+// Envía correo nativo con hasta 5 imágenes adjuntas vía FileProvider
+export async function sendEmailWithAttachments(
+to: string,
+subject: string,
+body: string,
+imageUris: string[]
+): Promise {
+if (!SnowMetadata || typeof SnowMetadata.sendEmailWithAttachments !== 'function') {
+return false;
+}
+return SnowMetadata.sendEmailWithAttachments(to, subject, body, imageUris);
+}
+
+// Verifica si Android tiene concedido el permiso de escritura de almacenamiento
+export async function hasStorageWritePermission(): Promise {
+if (!SnowMetadata || typeof SnowMetadata.hasStorageWritePermission !== 'function') {
+return false;
+}
+return SnowMetadata.hasStorageWritePermission();
+}
+
+// Abre o solicita el permiso de almacenamiento en Android
+export async function requestStorageWritePermission(): Promise {
+if (!SnowMetadata || typeof SnowMetadata.requestStorageWritePermission !== 'function') {
+return false;
+}
+return SnowMetadata.requestStorageWritePermission();
+}
+
+// Extrae información, streaming y lista de formatos (o playlist) usando yt-dlp nativo
+export async function extractMediaInfo(url: string): Promise {
+if (!SnowMetadata || typeof SnowMetadata.extractMediaInfo !== 'function') {
+return {
+ok: false,
+errorCode: 'NATIVE_REQUIRED',
+errorMessage:
+'El motor yt-dlp requiere la compilación nativa de Android (npx expo run:android).',
+};
+}
+return SnowMetadata.extractMediaInfo(url);
+}
+
+// Inicia una descarga gestionada por yt-dlp nativo
+export async function downloadMedia(
+options: DownloadMediaOptions
+): Promise {
+if (!SnowMetadata || typeof SnowMetadata.downloadMedia !== 'function') {
+return {
+ok: false,
+errorCode: 'NATIVE_REQUIRED',
+errorMessage:
+'El motor yt-dlp requiere la compilación nativa de Android (npx expo run:android).',
+};
+}
+return SnowMetadata.downloadMedia(options);
+}
+
+// Cancela una descarga en curso de yt-dlp por su taskId
+export async function cancelDownload(taskId: string): Promise {
+if (!SnowMetadata || typeof SnowMetadata.cancelDownload !== 'function') {
+return false;
+}
+return SnowMetadata.cancelDownload(taskId);
+}
+
+# // Escucha el progreso en tiempo real de las descargas yt-dlp
+export function addDownloadProgressListener(
+listener: (event: DownloadProgressEvent) => void
+): EventSubscription | null {
+if (!SnowMetadata || typeof SnowMetadata.addListener !== 'function') {
+return null;
+}
+return SnowMetadata.addListener('onDownloadProgress', listener);
+}
+
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/src/storage/downloadSettings.ts
+import { getAppSetting, setAppSetting } from './database/db';
+
+export const DEFAULT_VIDEO_DOWNLOAD_PATH =
+'Almacenamiento interno/Snow beats/Download/Snow beats video';
+export const DEFAULT_AUDIO_DOWNLOAD_PATH =
+'Almacenamiento interno/Snow beats/Download/Snow beats audio';
+
+const DOWNLOAD_PATHS_KEY = 'download_paths_config';
+
+export interface DownloadPathsConfig {
+audioPath: string;
+videoPath: string;
+}
+
+// Obtiene las rutas configuradas para descargas de audio y video con valores por defecto
+export async function getDownloadPaths(): Promise {
+try {
+const raw = await getAppSetting(DOWNLOAD_PATHS_KEY);
+if (raw) {
+const parsed = JSON.parse(raw);
+return {
+audioPath:
+typeof parsed.audioPath === 'string' && parsed.audioPath.trim().length > 0
+? parsed.audioPath.trim()
+: DEFAULT_AUDIO_DOWNLOAD_PATH,
+videoPath:
+typeof parsed.videoPath === 'string' && parsed.videoPath.trim().length > 0
+? parsed.videoPath.trim()
+: DEFAULT_VIDEO_DOWNLOAD_PATH,
+};
+}
+} catch { }
+
+```
+return {
+    audioPath: DEFAULT_AUDIO_DOWNLOAD_PATH,
+    videoPath: DEFAULT_VIDEO_DOWNLOAD_PATH,
+};
+
+```
+
+}
+
+// Guarda rutas personalizadas de descarga en SQLite local
+export async function saveDownloadPaths(config: DownloadPathsConfig): Promise {
+const normalized: DownloadPathsConfig = {
+audioPath: config.audioPath.trim() || DEFAULT_AUDIO_DOWNLOAD_PATH,
+videoPath: config.videoPath.trim() || DEFAULT_VIDEO_DOWNLOAD_PATH,
+};
+await setAppSetting(DOWNLOAD_PATHS_KEY, JSON.stringify(normalized));
+return normalized;
+}
+
+// Restaura las rutas por defecto de Snow Beats
+export async function resetDownloadPaths(): Promise {
+return saveDownloadPaths({
+audioPath: DEFAULT_AUDIO_DOWNLOAD_PATH,
+videoPath: DEFAULT_VIDEO_DOWNLOAD_PATH,
+});
+}
+
+============================================================
+FILE: snow-beats-b36f02e535124c4cac786d991dc9b7b620a6cba4/plugins/withSnowBeatsAndroid.js
+const {
+withAndroidManifest,
+withAppBuildGradle,
+withGradleProperties,
+} = require('@expo/config-plugins');
+
+// Plugin de Expo para configurar extractNativeLibs, legacy packaging (yt-dlp/FFmpeg) y almacenamiento en Android
+module.exports = function withSnowBeatsAndroid(config) {
+// 1. Habilita expo.useLegacyPackaging en gradle.properties para que Expo SDK 58/AGP 9 extraiga libpython.zip.so y libytdlp.zip.so
+config = withGradleProperties(config, (mod) => {
+const key = 'expo.useLegacyPackaging';
+const existing = mod.modResults.find((item) => item.type === 'property' && item.key === key);
+if (existing) {
+existing.value = 'true';
+} else {
+mod.modResults.push({
+type: 'property',
+key,
+value: 'true',
+});
+}
+return mod;
+});
+
+```
+// 2. Fuerza android:extractNativeLibs="true" con tools:replace para que el merger de Manifest nunca lo sobreescriba a false
+config = withAndroidManifest(config, (mod) => {
+    const manifest = mod.modResults.manifest;
+    if (!manifest.$) manifest.$ = {};
+    if (!manifest.$['xmlns:tools']) {
+        manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
+    const app = manifest.application?.[0];
+    if (app) {
+        if (!app.$) app.$ = {};
+        app.$['android:extractNativeLibs'] = 'true';
+        app.$['android:requestLegacyExternalStorage'] = 'true';
+
+        const currentReplace = (app.$['tools:replace'] || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        if (!currentReplace.includes('android:extractNativeLibs')) {
+            currentReplace.push('android:extractNativeLibs');
+        }
+        app.$['tools:replace'] = currentReplace.join(',');
+    }
+    return mod;
+});
+
+// 3. Solo inyecta packaging { jniLibs { useLegacyPackaging = true } } si el template de Expo no lee ya expo.useLegacyPackaging
+config = withAppBuildGradle(config, (mod) => {
+    let contents = mod.modResults.contents;
+
+    // Expo SDK 58 ya lee findProperty('expo.useLegacyPackaging') desde gradle.properties (configurado arriba en true)
+    if (contents.includes('expo.useLegacyPackaging')) {
+        return mod;
+    }
+
+    if (/^\s*useLegacyPackaging\s*=?\s*[^\n]+$/m.test(contents)) {
+        contents = contents.replace(
+            /^(\s*)useLegacyPackaging\s*=?\s*[^\n]+$/m,
+            '$1useLegacyPackaging = true'
+        );
+    } else if (/jniLibs\s*\{/.test(contents)) {
+        contents = contents.replace(
+            /jniLibs\s*\{/,
+            'jniLibs {\n            useLegacyPackaging = true'
+        );
+    } else if (/packagingOptions\s*\{/.test(contents)) {
+        contents = contents.replace(
+            /packagingOptions\s*\{/,
+            'packagingOptions {\n        jniLibs {\n            useLegacyPackaging = true\n        }'
+        );
+    } else if (/packaging\s*\{/.test(contents)) {
+        contents = contents.replace(
+            /packaging\s*\{/,
+            'packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }'
+        );
+    } else {
+        contents = contents.replace(
+            /android\s*\{/,
+            'android {\n    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }'
+        );
+    }
+
+    mod.modResults.contents = contents;
+    return mod;
+});
+
+return config;
+
+```
+
+};
+
+```
+
+
+
+```python?code_reference&code_event_index=6
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    root = z.namelist()[0].split('/')[0]
+    engine = z.read(f"{root}/modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowDownloaderEngine.kt").decode('utf-8', errors='replace')
+    print("SnowDownloaderEngine.kt length:", len(engine), "lines:", engine.count('\n'))
+    lines = engine.splitlines()
+    for i, l in enumerate(lines[:350], 1):
+        print(f"{i:4d}: {l}")
+
+
+```
+
+```text
+SnowDownloaderEngine.kt length: 49047 lines: 1359
+   1: package com.snowbeats.metadata
+   2: 
+   3: import android.Manifest
+   4: import android.app.Activity
+   5: import android.content.ContentValues
+   6: import android.content.Context
+   7: import android.content.Intent
+   8: import android.content.pm.PackageManager
+   9: import android.media.MediaScannerConnection
+  10: import android.net.ConnectivityManager
+  11: import android.net.NetworkCapabilities
+  12: import android.net.Uri
+  13: import android.os.Build
+  14: import android.os.Environment
+  15: import android.os.StatFs
+  16: import android.provider.DocumentsContract
+  17: import android.provider.MediaStore
+  18: import android.util.Log
+  19: import androidx.core.app.ActivityCompat
+  20: import androidx.core.content.ContextCompat
+  21: import com.yausername.ffmpeg.FFmpeg
+  22: import com.yausername.youtubedl_android.YoutubeDL
+  23: import com.yausername.youtubedl_android.YoutubeDLRequest
+  24: import org.json.JSONArray
+  25: import org.json.JSONObject
+  26: import java.io.File
+  27: import java.io.FileInputStream
+  28: import java.io.FileOutputStream
+  29: import java.net.HttpURLConnection
+  30: import java.net.URL
+  31: import java.util.Locale
+  32: 
+  33: // Motor nativo de extracción y descarga basado en yt-dlp (github.com/yt-dlp/yt-dlp) + FFmpeg
+  34: object SnowDownloaderEngine {
+  35:   private const val TAG = "SnowDownloaderEngine"
+  36:   private const val PREFS_NAME = "snow_beats_storage_prefs"
+  37:   private const val KEY_SAF_TREE_URI = "saf_tree_uri"
+  38:   private const val KEY_LAST_YTDLP_UPDATE_MS = "last_ytdlp_update_ms"
+  39:   private const val YTDLP_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L
+  40:   const val SAF_TREE_REQUEST_CODE = 5092
+  41:   const val LEGACY_STORAGE_REQUEST_CODE = 5091
+  42: 
+  43:   @Volatile
+  44:   private var initialized = false
+  45:   @Volatile
+  46:   private var updatedThisSession = false
+  47:   private val initLock = Any()
+  48:   private val updateLock = Any()
+  49: 
+  50:   private val allowedHosts = listOf(
+  51:     "youtube.com",
+  52:     "youtu.be",
+  53:     "music.youtube.com",
+  54:     "instagram.com",
+  55:     "instagr.am",
+  56:     "tiktok.com",
+  57:     "vm.tiktok.com",
+  58:     "vt.tiktok.com",
+  59:     "facebook.com",
+  60:     "fb.watch",
+  61:     "fb.com",
+  62:     "x.com",
+  63:     "twitter.com",
+  64:     "t.co"
+  65:   )
+  66: 
+  67:   // Clientes de YouTube que funcionan sin inicio de sesión ni cookies en Android
+  68:   private val youtubeClientStrategies = listOf(
+  69:     "youtube:player_client=android,tv",
+  70:     "youtube:player_client=tv,mweb",
+  71:     null
+  72:   )
+  73: 
+  74:   fun ensureInitialized(context: Context) {
+  75:     if (initialized) return
+  76:     synchronized(initLock) {
+  77:       if (initialized) return
+  78:       val appCtx = context.applicationContext
+  79:       val nativeLibDir = appCtx.applicationInfo.nativeLibraryDir
+  80:       val pythonLib = File(nativeLibDir, "libpython.zip.so")
+  81: 
+  82:       try {
+  83:         YoutubeDL.getInstance().init(appCtx)
+  84:       } catch (e: Exception) {
+  85:         val causeChain = buildCauseChain(e)
+  86:         Log.e(TAG, "Error inicializando YoutubeDL (nativeLibDir=$nativeLibDir): $causeChain", e)
+  87:         if (!pythonLib.exists()) {
+  88:           throw IllegalStateException(
+  89:             "Faltan librerías nativas de yt-dlp (libpython.zip.so no extraída en APK). " +
+  90:               "Ejecuta 'npx expo prebuild --clean' y 'npx expo run:android' para aplicar useLegacyPackaging=true.",
+  91:             e
+  92:           )
+  93:         }
+  94:         throw IllegalStateException("No se pudo inicializar yt-dlp: $causeChain", e)
+  95:       }
+  96: 
+  97:       try {
+  98:         FFmpeg.getInstance().init(appCtx)
+  99:       } catch (e: Exception) {
+ 100:         // FFmpeg es opcional si solo se descargan flujos progresivos directos
+ 101:         Log.w(TAG, "FFmpeg no disponible: ${buildCauseChain(e)}")
+ 102:       }
+ 103:       initialized = true
+ 104: 
+ 105:       // Actualiza el binario yt-dlp una vez cada 24h en segundo plano para evitar bloqueos 403 de YouTube/IG
+ 106:       maybeUpdateYtDlp(appCtx, force = false)
+ 107:     }
+ 108:   }
+ 109: 
+ 110:   // Actualiza yt-dlp desde el canal estable oficial (resuelve cambios frecuentes de YouTube/Instagram)
+ 111:   private fun maybeUpdateYtDlp(context: Context, force: Boolean): Boolean {
+ 112:     synchronized(updateLock) {
+ 113:       val appCtx = context.applicationContext
+ 114:       if (!isNetworkAvailable(appCtx)) return false
+ 115:       val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+ 116:       val lastUpdate = prefs.getLong(KEY_LAST_YTDLP_UPDATE_MS, 0L)
+ 117:       val now = System.currentTimeMillis()
+ 118: 
+ 119:       if (!force && (now - lastUpdate) < YTDLP_UPDATE_INTERVAL_MS) {
+ 120:         return false
+ 121:       }
+ 122:       if (force && updatedThisSession) {
+ 123:         return false
+ 124:       }
+ 125: 
+ 126:       return try {
+ 127:         Log.i(TAG, "Actualizando binario interno de yt-dlp (force=$force)...")
+ 128:         YoutubeDL.getInstance().updateYoutubeDL(appCtx)
+ 129:         updatedThisSession = true
+ 130:         prefs.edit().putLong(KEY_LAST_YTDLP_UPDATE_MS, now).apply()
+ 131:         Log.i(TAG, "yt-dlp actualizado correctamente.")
+ 132:         true
+ 133:       } catch (e: Exception) {
+ 134:         Log.w(TAG, "No se pudo actualizar yt-dlp: ${buildCauseChain(e)}")
+ 135:         false
+ 136:       }
+ 137:     }
+ 138:   }
+ 139: 
+ 140:   private fun buildCauseChain(throwable: Throwable): String {
+ 141:     val parts = mutableListOf<String>()
+ 142:     var cur: Throwable? = throwable
+ 143:     var depth = 0
+ 144:     while (cur != null && depth < 6) {
+ 145:       val msg = cur.message?.trim()
+ 146:       if (!msg.isNullOrEmpty() && !parts.contains(msg)) {
+ 147:         parts.add(msg)
+ 148:       }
+ 149:       cur = cur.cause
+ 150:       depth++
+ 151:     }
+ 152:     return if (parts.isEmpty()) throwable.javaClass.simpleName else parts.joinToString(" -> ")
+ 153:   }
+ 154: 
+ 155:   fun isNetworkAvailable(context: Context): Boolean {
+ 156:     return try {
+ 157:       val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+ 158:       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+ 159:         val network = cm.activeNetwork ?: return false
+ 160:         val caps = cm.getNetworkCapabilities(network) ?: return false
+ 161:         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+ 162:       } else {
+ 163:         @Suppress("DEPRECATION")
+ 164:         cm.activeNetworkInfo?.isConnected == true
+ 165:       }
+ 166:     } catch (_: Exception) {
+ 167:       true
+ 168:     }
+ 169:   }
+ 170: 
+ 171:   // Obtiene la URI persistida de SAF si el usuario concedió acceso a una carpeta
+ 172:   fun getPersistedSafTreeUri(context: Context): Uri? {
+ 173:     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+ 174:     val saved = prefs.getString(KEY_SAF_TREE_URI, null) ?: return null
+ 175:     val uri = try { Uri.parse(saved) } catch (_: Exception) { return null }
+ 176:     val stillGranted = context.contentResolver.persistedUriPermissions.any { perm ->
+ 177:       perm.uri == uri && perm.isWritePermission
+ 178:     }
+ 179:     return if (stillGranted) uri else null
+ 180:   }
+ 181: 
+ 182:   // Guarda el permiso persistente devuelto por ACTION_OPEN_DOCUMENT_TREE (compatible con HyperOS)
+ 183:   fun handleSafResult(context: Context, resultCode: Int, data: Intent?): Boolean {
+ 184:     if (resultCode != Activity.RESULT_OK) return false
+ 185:     val treeUri = data?.data ?: return false
+ 186:     return try {
+ 187:       val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+ 188:       context.contentResolver.takePersistableUriPermission(treeUri, flags)
+ 189:       context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+ 190:         .edit()
+ 191:         .putString(KEY_SAF_TREE_URI, treeUri.toString())
+ 192:         .apply()
+ 193:       true
+ 194:     } catch (e: Exception) {
+ 195:       Log.e(TAG, "No se pudo persistir permiso SAF: ${e.message}", e)
+ 196:       false
+ 197:     }
+ 198:   }
+ 199: 
+ 200:   fun hasStorageWritePermission(context: Context): Boolean {
+ 201:     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+ 202:       // Acepta Acceso a todos los archivos O carpeta autorizada vía SAF (no bloqueado en HyperOS)
+ 203:       Environment.isExternalStorageManager() || getPersistedSafTreeUri(context) != null
+ 204:     } else {
+ 205:       ContextCompat.checkSelfPermission(
+ 206:         context,
+ 207:         Manifest.permission.WRITE_EXTERNAL_STORAGE
+ 208:       ) == PackageManager.PERMISSION_GRANTED
+ 209:     }
+ 210:   }
+ 211: 
+ 212:   // Lanza selector de carpeta SAF en Android 11+ (evita el bloqueo de Ajustes Restringidos en HyperOS)
+ 213:   fun launchStoragePermissionRequest(activity: Activity?): Boolean {
+ 214:     if (activity == null) return false
+ 215:     if (hasStorageWritePermission(activity)) return true
+ 216: 
+ 217:     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+ 218:       try {
+ 219:         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+ 220:           addFlags(
+ 221:             Intent.FLAG_GRANT_READ_URI_PERMISSION or
+ 222:               Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+ 223:               Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+ 224:               Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+ 225:           )
+ 226:           // Sugiere iniciar en Music/ para que el usuario pueda confirmar o crear "Snow beats" en 1 toque
+ 227:           val initialUri = DocumentsContract.buildDocumentUri(
+ 228:             "com.android.externalstorage.documents",
+ 229:             "primary:Music"
+ 230:           )
+ 231:           putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+ 232:         }
+ 233:         activity.startActivityForResult(intent, SAF_TREE_REQUEST_CODE)
+ 234:         true
+ 235:       } catch (e: Exception) {
+ 236:         Log.e(TAG, "Error lanzando ACTION_OPEN_DOCUMENT_TREE: ${e.message}", e)
+ 237:         false
+ 238:       }
+ 239:     } else {
+ 240:       ActivityCompat.requestPermissions(
+ 241:         activity,
+ 242:         arrayOf(
+ 243:           Manifest.permission.WRITE_EXTERNAL_STORAGE,
+ 244:           Manifest.permission.READ_EXTERNAL_STORAGE
+ 245:         ),
+ 246:         LEGACY_STORAGE_REQUEST_CODE
+ 247:       )
+ 248:       true
+ 249:     }
+ 250:   }
+ 251: 
+ 252:   // Convierte una ruta amigable ("Almacenamiento interno/Snow beats/...") en segmentos relativos limpios
+ 253:   private fun cleanRelativePath(displayPath: String): String {
+ 254:     val cleaned = displayPath
+ 255:       .trim()
+ 256:       .replace("\\", "/")
+ 257:       .removePrefix("Almacenamiento interno/")
+ 258:       .removePrefix("Almacenamiento interno")
+ 259:       .removePrefix("/storage/emulated/0/")
+ 260:       .removePrefix("/")
+ 261:       .replace("..", "")
+ 262:       .trim('/')
+ 263:     return cleaned.ifBlank { "Snow beats/Download" }
+ 264:   }
+ 265: 
+ 266:   // Convierte una ruta amigable ("Almacenamiento interno/Snow beats/...") en carpeta real en Android
+ 267:   fun resolveTargetDirectory(displayPath: String): File {
+ 268:     val root = Environment.getExternalStorageDirectory()
+ 269:     return File(root, cleanRelativePath(displayPath))
+ 270:   }
+ 271: 
+ 272:   private fun getAvailableSpaceBytes(dir: File): Long {
+ 273:     return try {
+ 274:       val checkDir = if (dir.exists()) dir else Environment.getExternalStorageDirectory()
+ 275:       val stat = StatFs(checkDir.absolutePath)
+ 276:       stat.availableBytes
+ 277:     } catch (_: Exception) {
+ 278:       Long.MAX_VALUE
+ 279:     }
+ 280:   }
+ 281: 
+ 282:   fun detectPlatform(url: String): String? {
+ 283:     return try {
+ 284:       val host = (Uri.parse(url).host ?: "").lowercase(Locale.US).removePrefix("www.").removePrefix("m.")
+ 285:       when {
+ 286:         host.contains("youtube.com") || host == "youtu.be" -> "YouTube"
+ 287:         host.contains("instagram.com") || host.contains("instagr.am") -> "Instagram"
+ 288:         host.contains("tiktok.com") -> "TikTok"
+ 289:         host.contains("facebook.com") || host == "fb.watch" || host == "fb.com" -> "Facebook"
+ 290:         host == "x.com" || host.endsWith(".x.com") || host.contains("twitter.com") || host == "t.co" -> "X"
+ 291:         else -> null
+ 292:       }
+ 293:     } catch (_: Exception) {
+ 294:       null
+ 295:     }
+ 296:   }
+ 297: 
+ 298:   fun isAllowedUrl(url: String): Boolean {
+ 299:     return try {
+ 300:       val parsed = Uri.parse(url.trim())
+ 301:       val scheme = parsed.scheme?.lowercase(Locale.US)
+ 302:       if (scheme != "http" && scheme != "https") return false
+ 303:       val host = (parsed.host ?: "").lowercase(Locale.US).removePrefix("www.").removePrefix("m.")
+ 304:       allowedHosts.any { allowed -> host == allowed || host.endsWith(".$allowed") }
+ 305:     } catch (_: Exception) {
+ 306:       false
+ 307:     }
+ 308:   }
+ 309: 
+ 310:   // Limpia parámetros de rastreo (?dmpr=, ?avpt=, ?igsh=) en URLs de Instagram para mejorar compatibilidad
+ 311:   private fun normalizeUrl(rawUrl: String): String {
+ 312:     val trimmed = rawUrl.trim()
+ 313:     return try {
+ 314:       val uri = Uri.parse(trimmed)
+ 315:       val host = (uri.host ?: "").lowercase(Locale.US)
+ 316:       if (host.contains("instagram.com")) {
+ 317:         val path = (uri.path ?: "").trimEnd('/')
+ 318:         if (path.startsWith("/reel/") || path.startsWith("/reels/") || path.startsWith("/p/") || path.startsWith("/tv/")) {
+ 319:           val normalizedPath = path.replaceFirst("/reels/", "/reel/")
+ 320:           return "https://www.instagram.com$normalizedPath/"
+ 321:         }
+ 322:       }
+ 323:       trimmed
+ 324:     } catch (_: Exception) {
+ 325:       trimmed
+ 326:     }
+ 327:   }
+ 328: 
+ 329:   private fun isRetryableExtractorError(e: Exception): Boolean {
+ 330:     val raw = buildCauseChain(e).lowercase(Locale.US)
+ 331:     return raw.contains("403") ||
+ 332:       raw.contains("forbidden") ||
+ 333:       raw.contains("sign in") ||
+ 334:       raw.contains("bot") ||
+ 335:       raw.contains("player") ||
+ 336:       raw.contains("requested format is not available") ||
+ 337:       raw.contains("nsig") ||
+ 338:       raw.contains("sabr")
+ 339:   }
+ 340: 
+ 341:   // Respaldo público para Reels/Posts de Instagram vía página embed cuando yt-dlp recibe bloqueo anónimo
+ 342:   private fun tryInstagramPublicEmbedFallback(canonicalUrl: String): Map<String, Any?>? {
+ 343:     val match = Regex("instagram\\.com/(reel|p|tv)/([A-Za-z0-9_-]+)").find(canonicalUrl) ?: return null
+ 344:     val kind = match.groupValues[1]
+ 345:     val shortcode = match.groupValues[2]
+ 346:     val embedUrl = "https://www.instagram.com/$kind/$shortcode/embed/captioned/"
+ 347: 
+ 348:     return try {
+ 349:       val conn = (URL(embedUrl).openConnection() as HttpURLConnection).apply {
+ 350:         requestMethod = "GET"
+
+
+```
+
+```python
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    root = z.namelist()[0].split('/')[0]
+    engine = z.read(f"{root}/modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowDownloaderEngine.kt").decode('utf-8', errors='replace')
+    lines = engine.splitlines()
+    for i, l in enumerate(lines[350:800], 351):
+        print(f"{i:4d}: {l}")
+
+
+```
+
+```text
+ 351:         connectTimeout = 10000
+ 352:         readTimeout = 10000
+ 353:         instanceFollowRedirects = true
+ 354:         setRequestProperty(
+ 355:           "User-Agent",
+ 356:           "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+ 357:         )
+ 358:         setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+ 359:         setRequestProperty("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
+ 360:       }
+ 361:       if (conn.responseCode !in 200..299) {
+ 362:         conn.disconnect()
+ 363:         return null
+ 364:       }
+ 365:       val html = conn.inputStream.bufferedReader().use { it.readText() }
+ 366:       conn.disconnect()
+ 367: 
+ 368:       val rawVideoUrl = Regex("\"video_url\"\\s*:\\s*\"([^\"]+)\"")
+ 369:         .find(html)?.groupValues?.getOrNull(1)
+ 370:         ?: Regex("\\\\\"video_url\\\\\"\\s*:\\s*\\\\\"([^\\\\\"]+)\\\\\"")
+ 371:           .find(html)?.groupValues?.getOrNull(1)
+ 372:         ?: return null
+ 373: 
+ 374:       val videoUrl = unescapeJsonUrl(rawVideoUrl)
+ 375:       if (!videoUrl.startsWith("http")) return null
+ 376: 
+ 377:       val rawThumb = Regex("\"display_url\"\\s*:\\s*\"([^\"]+)\"")
+ 378:         .find(html)?.groupValues?.getOrNull(1)
+ 379:         ?: Regex("\"thumbnail_src\"\\s*:\\s*\"([^\"]+)\"")
+ 380:           .find(html)?.groupValues?.getOrNull(1)
+ 381:       val thumbUrl = rawThumb?.let { unescapeJsonUrl(it) }?.takeIf { it.startsWith("http") }
+ 382: 
+ 383:       val rawAuthor = Regex("\"username\"\\s*:\\s*\"([^\"]+)\"")
+ 384:         .find(html)?.groupValues?.getOrNull(1) ?: "Instagram"
+ 385: 
+ 386:       val title = "Instagram Reel · @$rawAuthor"
+ 387: 
+ 388:       mapOf(
+ 389:         "ok" to true,
+ 390:         "isPlaylist" to false,
+ 391:         "isAudioOnly" to false,
+ 392:         "title" to title,
+ 393:         "uploader" to "@$rawAuthor",
+ 394:         "domain" to "instagram.com",
+ 395:         "platform" to "Instagram",
+ 396:         "thumbnail" to thumbUrl,
+ 397:         "duration" to 0.0,
+ 398:         "url" to videoUrl,
+ 399:         "previewStreamUrl" to videoUrl,
+ 400:         "entries" to emptyList>(),
+ 401:         "audioFormats" to listOf(
+ 402:           mapOf(
+ 403:             "id" to "ig_audio_128",
+ 404:             "formatId" to "bestaudio/best",
+ 405:             "mediaType" to "audio",
+ 406:             "label" to "MP3 clásico (128 kbps)",
+ 407:             "ext" to "mp3",
+ 408:             "qualityRank" to 128,
+ 409:             "audioQuality" to "128K",
+ 410:             "filesize" to 0L
+ 411:           ),
+ 412:           mapOf(
+ 413:             "id" to "ig_audio_192",
+ 414:             "formatId" to "bestaudio/best",
+ 415:             "mediaType" to "audio",
+ 416:             "label" to "Alta calidad (192 kbps)",
+ 417:             "ext" to "mp3",
+ 418:             "qualityRank" to 192,
+ 419:             "audioQuality" to "192K",
+ 420:             "filesize" to 0L
+ 421:           )
+ 422:         ),
+ 423:         "videoFormats" to listOf(
+ 424:           mapOf(
+ 425:             "id" to "ig_video_best",
+ 426:             "formatId" to "best",
+ 427:             "mediaType" to "video",
+ 428:             "label" to "Calidad original (MP4)",
+ 429:             "ext" to "mp4",
+ 430:             "qualityRank" to 720,
+ 431:             "height" to 720,
+ 432:             "filesize" to 0L
+ 433:           )
+ 434:         )
+ 435:       )
+ 436:     } catch (e: Exception) {
+ 437:       Log.w(TAG, "Respaldo embed de Instagram no disponible: ${e.message}")
+ 438:       null
+ 439:     }
+ 440:   }
+ 441: 
+ 442:   private fun unescapeJsonUrl(raw: String): String {
+ 443:     return raw
+ 444:       .replace("\\/", "/")
+ 445:       .replace("\\u0026", "&")
+ 446:       .replace("\\u002F", "/")
+ 447:       .replace("&amp;", "&")
+ 448:       .replace("\\\\", "\\")
+ 449:   }
+ 450: 
+ 451:   // Extrae metadatos, formatos disponibles (audio/video ordenados de menor a mayor) o elementos de playlist
+ 452:   fun extractMediaInfo(context: Context, rawUrl: String): Map<String, Any?> {
+ 453:     val url = normalizeUrl(rawUrl)
+ 454:     if (!isAllowedUrl(url)) {
+ 455:       return mapOf(
+ 456:         "ok" to false,
+ 457:         "errorCode" to "UNSUPPORTED_URL",
+ 458:         "errorMessage" to "Enlace no compatible. Usa URLs de YouTube, Instagram, TikTok, Facebook o X."
+ 459:       )
+ 460:     }
+ 461: 
+ 462:     if (!isNetworkAvailable(context)) {
+ 463:       return mapOf(
+ 464:         "ok" to false,
+ 465:         "errorCode" to "NO_INTERNET",
+ 466:         "errorMessage" to "Sin conexión a internet. Verifica tu Wi-Fi o datos móviles e intenta nuevamente."
+ 467:       )
+ 468:     }
+ 469: 
+ 470:     val detectedPlatform = detectPlatform(url)
+ 471: 
+ 472:     return try {
+ 473:       ensureInitialized(context)
+ 474: 
+ 475:       val strategies: List<String?> = if (detectedPlatform == "YouTube") {
+ 476:         youtubeClientStrategies
+ 477:       } else {
+ 478:         listOf(null)
+ 479:       }
+ 480: 
+ 481:       var rawOut = ""
+ 482:       var lastException: Exception? = null
+ 483:       var didForceUpdate = false
+ 484: 
+ 485:       var idx = 0
+ 486:       while (idx < strategies.size) {
+ 487:         val extractorArg = strategies[idx]
+ 488:         try {
+ 489:           val request = YoutubeDLRequest(url).apply {
+ 490:             addOption("--dump-single-json")
+ 491:             addOption("--no-warnings")
+ 492:             addOption("--flat-playlist")
+ 493:             addOption("--no-check-certificates")
+ 494:             addOption("--geo-bypass")
+ 495:             if (extractorArg != null) {
+ 496:               addOption("--extractor-args", extractorArg)
+ 497:             }
+ 498:           }
+ 499:           val response = YoutubeDL.getInstance().execute(request, "extract_${System.currentTimeMillis()}")
+ 500:           val out = response.out?.trim() ?: ""
+ 501:           if (out.isNotBlank()) {
+ 502:             rawOut = out
+ 503:             lastException = null
+ 504:             break
+ 505:           }
+ 506:         } catch (e: Exception) {
+ 507:           lastException = e
+ 508:           Log.w(TAG, "extractMediaInfo fallo (platform=$detectedPlatform, arg=$extractorArg): ${buildCauseChain(e)}")
+ 509:           // Si falla por bloqueo/403 y aún no actualizamos yt-dlp en esta sesión, actualiza y reintenta
+ 510:           if (!didForceUpdate && isRetryableExtractorError(e)) {
+ 511:             didForceUpdate = true
+ 512:             if (maybeUpdateYtDlp(context, force = true)) {
+ 513:               continue
+ 514:             }
+ 515:           }
+ 516:         }
+ 517:         idx++
+ 518:       }
+ 519: 
+ 520:       if (rawOut.isBlank()) {
+ 521:         // Para Instagram público intenta respaldo embed antes de rendirse
+ 522:         if (detectedPlatform == "Instagram") {
+ 523:           val igFallback = tryInstagramPublicEmbedFallback(url)
+ 524:           if (igFallback != null) return igFallback
+ 525:         }
+ 526: 
+ 527:         if (lastException != null) {
+ 528:           val (code, msg) = classifyError(lastException, context, detectedPlatform)
+ 529:           return mapOf(
+ 530:             "ok" to false,
+ 531:             "errorCode" to code,
+ 532:             "errorMessage" to msg
+ 533:           )
+ 534:         }
+ 535:         return mapOf(
+ 536:           "ok" to false,
+ 537:           "errorCode" to "EMPTY_RESPONSE",
+ 538:           "errorMessage" to "yt-dlp no devolvió información para este enlace."
+ 539:         )
+ 540:       }
+ 541: 
+ 542:       val jsonLine = rawOut.lineSequence().lastOrNull { it.trim().startsWith("{") } ?: rawOut
+ 543:       val root = JSONObject(jsonLine)
+ 544:       val type = root.optString("_type", "video")
+ 545:       val platform = detectedPlatform ?: root.optString("extractor_key", "Web")
+ 546:       val hostDomain = Uri.parse(url).host ?: platform
+ 547: 
+ 548:       // Caso 1: Playlist o colección de múltiples videos/pistas
+ 549:       if (type == "playlist" || root.has("entries")) {
+ 550:         val entriesArr = root.optJSONArray("entries") ?: JSONArray()
+ 551:         val items = mutableListOf>()
+ 552:         for (i in 0 until entriesArr.length()) {
+ 553:           val entry = entriesArr.optJSONObject(i) ?: continue
+ 554:           val entryId = entry.optString("id", "item_$i")
+ 555:           val entryTitle = entry.optString("title", "Elemento ${i + 1}")
+ 556:           val entryDuration = entry.optDouble("duration", 0.0).takeIf { !it.isNaN() } ?: 0.0
+ 557:           val entryUrl = entry.optString("url").ifBlank {
+ 558:             entry.optString("webpage_url").ifBlank {
+ 559:               if (platform == "YouTube" && entryId.isNotBlank()) "https://www.youtube.com/watch?v=$entryId" else url
+ 560:             }
+ 561:           }
+ 562:           val thumb = extractBestThumbnail(entry)
+ 563:           items.add(
+ 564:             mapOf(
+ 565:               "id" to entryId,
+ 566:               "index" to (i + 1),
+ 567:               "title" to entryTitle,
+ 568:               "artist" to entry.optString("uploader", entry.optString("channel", platform)),
+ 569:               "duration" to entryDuration,
+ 570:               "thumbnail" to thumb,
+ 571:               "url" to entryUrl
+ 572:             )
+ 573:           )
+ 574:         }
+ 575: 
+ 576:         // Formatos estándar para descarga masiva de playlist (ordenados de menor a mayor calidad)
+ 577:         val defaultAudioFormats = buildStandardPlaylistAudioFormats()
+ 578:         val defaultVideoFormats = buildStandardPlaylistVideoFormats()
+ 579: 
+ 580:         return mapOf(
+ 581:           "ok" to true,
+ 582:           "isPlaylist" to true,
+ 583:           "isAudioOnly" to false,
+ 584:           "title" to root.optString("title", "Lista de reproducción"),
+ 585:           "uploader" to root.optString("uploader", platform),
+ 586:           "domain" to hostDomain,
+ 587:           "platform" to platform,
+ 588:           "thumbnail" to (extractBestThumbnail(root) ?: items.firstOrNull()?.get("thumbnail")),
+ 589:           "duration" to 0.0,
+ 590:           "url" to url,
+ 591:           "previewStreamUrl" to null,
+ 592:           "entries" to items,
+ 593:           "audioFormats" to defaultAudioFormats,
+ 594:           "videoFormats" to defaultVideoFormats
+ 595:         )
+ 596:       }
+ 597: 
+ 598:       // Caso 2: Recurso individual (video o audio)
+ 599:       val parsedFormats = parseFormats(root)
+ 600:       val previewInfo = pickPreviewStream(root)
+ 601: 
+ 602:       mapOf(
+ 603:         "ok" to true,
+ 604:         "isPlaylist" to false,
+ 605:         "isAudioOnly" to previewInfo.first,
+ 606:         "title" to root.optString("title", "Sin título"),
+ 607:         "uploader" to root.optString("uploader", root.optString("channel", platform)),
+ 608:         "domain" to hostDomain,
+ 609:         "platform" to platform,
+ 610:         "thumbnail" to extractBestThumbnail(root),
+ 611:         "duration" to (root.optDouble("duration", 0.0).takeIf { !it.isNaN() } ?: 0.0),
+ 612:         "url" to root.optString("webpage_url", url),
+ 613:         "previewStreamUrl" to previewInfo.second,
+ 614:         "entries" to emptyList>(),
+ 615:         "audioFormats" to parsedFormats.first,
+ 616:         "videoFormats" to parsedFormats.second
+ 617:       )
+ 618:     } catch (e: Exception) {
+ 619:       val (code, msg) = classifyError(e, context, detectedPlatform)
+ 620:       mapOf(
+ 621:         "ok" to false,
+ 622:         "errorCode" to code,
+ 623:         "errorMessage" to msg
+ 624:       )
+ 625:     }
+ 626:   }
+ 627: 
+ 628:   private fun extractBestThumbnail(obj: JSONObject): String? {
+ 629:     val direct = obj.optString("thumbnail")
+ 630:     if (direct.startsWith("http")) return direct
+ 631:     val arr = obj.optJSONArray("thumbnails") ?: return null
+ 632:     for (i in arr.length() - 1 downTo 0) {
+ 633:       val item = arr.optJSONObject(i) ?: continue
+ 634:       val u = item.optString("url")
+ 635:       if (u.startsWith("http")) return u
+ 636:     }
+ 637:     return null
+ 638:   }
+ 639: 
+ 640:   // Selecciona una URL de streaming directa compatible con exo-video / exo-audio
+ 641:   private fun pickPreviewStream(root: JSONObject): Pair<Boolean, String?> {
+ 642:     val formats = root.optJSONArray("formats")
+ 643:     if (formats == null || formats.length() == 0) {
+ 644:       val direct = root.optString("url").takeIf { it.startsWith("http") }
+ 645:       val vcodec = root.optString("vcodec", "none")
+ 646:       val isAudioOnly = vcodec == "none"
+ 647:       return Pair(isAudioOnly, direct)
+ 648:     }
+ 649: 
+ 650:     var bestProgressiveVideo: String? = null
+ 651:     var bestProgressiveHeight = 0
+ 652:     var bestAnyVideo: String? = null
+ 653:     var bestAudioOnly: String? = null
+ 654:     var bestAudioAbr = 0.0
+ 655: 
+ 656:     for (i in 0 until formats.length()) {
+ 657:       val f = formats.optJSONObject(i) ?: continue
+ 658:       val u = f.optString("url")
+ 659:       if (!u.startsWith("http")) continue
+ 660:       val protocol = f.optString("protocol", "")
+ 661:       if (protocol.contains("mhtml")) continue
+ 662: 
+ 663:       val vcodec = f.optString("vcodec", "none")
+ 664:       val acodec = f.optString("acodec", "none")
+ 665:       val ext = f.optString("ext", "")
+ 666:       val height = f.optInt("height", 0)
+ 667:       val abr = f.optDouble("abr", 0.0).takeIf { !it.isNaN() } ?: 0.0
+ 668: 
+ 669:       if (vcodec != "none" && acodec != "none") {
+ 670:         // Prioriza MP4 progresivo hasta 720p para carga rápida de vista previa
+ 671:         if (ext == "mp4" && height in 240..720 && height >= bestProgressiveHeight) {
+ 672:           bestProgressiveHeight = height
+ 673:           bestProgressiveVideo = u
+ 674:         } else if (bestAnyVideo == null) {
+ 675:           bestAnyVideo = u
+ 676:         }
+ 677:       } else if (vcodec == "none" && acodec != "none") {
+ 678:         if (abr >= bestAudioAbr) {
+ 679:           bestAudioAbr = abr
+ 680:           bestAudioOnly = u
+ 681:         }
+ 682:       }
+ 683:     }
+ 684: 
+ 685:     val chosenVideo = bestProgressiveVideo ?: bestAnyVideo
+ 686:     if (chosenVideo != null) return Pair(false, chosenVideo)
+ 687:     if (bestAudioOnly != null) return Pair(true, bestAudioOnly)
+ 688: 
+ 689:     val fallback = root.optString("url").takeIf { it.startsWith("http") }
+ 690:     return Pair(false, fallback)
+ 691:   }
+ 692: 
+ 693:   // Extrae todos los formatos soportados y los ordena estrictamente de MENOR a MAYOR calidad
+ 694:   private fun parseFormats(root: JSONObject): Pair<List>, List>> {
+ 695:     val formats = root.optJSONArray("formats") ?: JSONArray()
+ 696:     val duration = root.optDouble("duration", 0.0).takeIf { !it.isNaN() } ?: 0.0
+ 697: 
+ 698:     val audioByKbps = mutableMapOf<Int, MutableMap<String, Any?>>()
+ 699:     val videoByHeight = mutableMapOf<Int, MutableMap<String, Any?>>()
+ 700: 
+ 701:     var bestAudioSize = 0L
+ 702: 
+ 703:     for (i in 0 until formats.length()) {
+ 704:       val f = formats.optJSONObject(i) ?: continue
+ 705:       val formatId = f.optString("format_id")
+ 706:       if (formatId.isBlank()) continue
+ 707:       val ext = f.optString("ext", "")
+ 708:       if (ext == "mhtml" || ext == "jpg" || ext == "webp") continue
+ 709: 
+ 710:       val vcodec = f.optString("vcodec", "none")
+ 711:       val acodec = f.optString("acodec", "none")
+ 712:       val height = f.optInt("height", 0)
+ 713:       val fps = f.optInt("fps", 0)
+ 714:       val abr = f.optDouble("abr", 0.0).takeIf { !it.isNaN() } ?: 0.0
+ 715:       val tbr = f.optDouble("tbr", 0.0).takeIf { !it.isNaN() } ?: 0.0
+ 716:       val rawSize = f.optLong("filesize", f.optLong("filesize_approx", 0L))
+ 717:       val estimatedSize = if (rawSize > 0L) rawSize else ((tbr * 1000.0 / 8.0) * duration).toLong()
+ 718: 
+ 719:       if (vcodec == "none" && acodec != "none") {
+ 720:         if (estimatedSize > bestAudioSize) bestAudioSize = estimatedSize
+ 721:         val kbps = (if (abr > 0) abr else tbr).toInt().coerceAtLeast(48)
+ 722:         val bucket = when {
+ 723:           kbps <= 64 -> 64
+ 724:           kbps <= 128 -> 128
+ 725:           kbps <= 192 -> 192
+ 726:           kbps <= 256 -> 256
+ 727:           else -> 320
+ 728:         }
+ 729:         val existing = audioByKbps[bucket]
+ 730:         if (existing == null || ext == "m4a") {
+ 731:           audioByKbps[bucket] = mutableMapOf(
+ 732:             "id" to "audio_${bucket}_${formatId}",
+ 733:             "formatId" to "bestaudio[ext=m4a]/bestaudio/best",
+ 734:             "mediaType" to "audio",
+ 735:             "label" to "MP3 ${bucket} kbps",
+ 736:             "ext" to "mp3",
+ 737:             "qualityRank" to bucket,
+ 738:             "audioQuality" to "${bucket}K",
+ 739:             "filesize" to estimatedSize
+ 740:           )
+ 741:         }
+ 742:       } else if (vcodec != "none" && height > 0) {
+ 743:         val existing = videoByHeight[height]
+ 744:         val existingIsMp4 = (existing?.get("ext") as? String) == "mp4"
+ 745:         if (existing == null || (ext == "mp4" && !existingIsMp4)) {
+ 746:           val labelPrefix = when {
+ 747:             height <= 360 -> "Rápido (${height}p)"
+ 748:             height <= 480 -> "Estándar (${height}p)"
+ 749:             height <= 720 -> "Alta calidad (${height}p)"
+ 750:             height <= 1080 -> "Full HD (${height}p)"
+ 751:             height <= 1440 -> "2K (${height}p)"
+ 752:             else -> "4K (${height}p)"
+ 753:           }
+ 754:           val totalSize = if (acodec == "none" && estimatedSize > 0L) {
+ 755:             estimatedSize + bestAudioSize
+ 756:           } else {
+ 757:             estimatedSize
+ 758:           }
+ 759:           // Selector resiliente por altura (evita fallos 403 por format_id caducados o específicos de un cliente)
+ 760:           val selector =
+ 761:             "bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best"
+ 762:           videoByHeight[height] = mutableMapOf(
+ 763:             "id" to "video_${height}_${formatId}",
+ 764:             "formatId" to selector,
+ 765:             "mediaType" to "video",
+ 766:             "label" to if (fps >= 50) "$labelPrefix ${fps}fps" else labelPrefix,
+ 767:             "ext" to "mp4",
+ 768:             "qualityRank" to height,
+ 769:             "height" to height,
+ 770:             "filesize" to totalSize
+ 771:           )
+ 772:         }
+ 773:       }
+ 774:     }
+ 775: 
+ 776:     // Garantiza opciones estándar ordenadas de menor a mayor calidad si la plataforma expone pocos metadatos (TikTok/IG/X)
+ 777:     val sortedAudio = audioByKbps.values
+ 778:       .sortedBy { (it["qualityRank"] as? Int) ?: 0 }
+ 779:       .ifEmpty { buildStandardPlaylistAudioFormats() }
+ 780: 
+ 781:     val sortedVideo = videoByHeight.values
+ 782:       .sortedBy { (it["qualityRank"] as? Int) ?: 0 }
+ 783:       .ifEmpty { buildStandardPlaylistVideoFormats() }
+ 784: 
+ 785:     return Pair(sortedAudio, sortedVideo)
+ 786:   }
+ 787: 
+ 788:   private fun buildStandardPlaylistAudioFormats(): List> = listOf(
+ 789:     mapOf(
+ 790:       "id" to "std_audio_64",
+ 791:       "formatId" to "worstaudio/bestaudio",
+ 792:       "mediaType" to "audio",
+ 793:       "label" to "Rápido (64 kbps)",
+ 794:       "ext" to "mp3",
+ 795:       "qualityRank" to 64,
+ 796:       "audioQuality" to "64K",
+ 797:       "filesize" to 0L
+ 798:     ),
+ 799:     mapOf(
+ 800:       "id" to "std_audio_128",
+
+
+```
+
+```python
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    root = z.namelist()[0].split('/')[0]
+    engine = z.read(f"{root}/modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowDownloaderEngine.kt").decode('utf-8', errors='replace')
+    lines = engine.splitlines()
+    for i, l in enumerate(lines[800:1150], 801):
+        print(f"{i:4d}: {l}")
+
+
+```
+
+```text
+ 801:       "formatId" to "bestaudio/best",
+ 802:       "mediaType" to "audio",
+ 803:       "label" to "MP3 clásico (128 kbps)",
+ 804:       "ext" to "mp3",
+ 805:       "qualityRank" to 128,
+ 806:       "audioQuality" to "128K",
+ 807:       "filesize" to 0L
+ 808:     ),
+ 809:     mapOf(
+ 810:       "id" to "std_audio_192",
+ 811:       "formatId" to "bestaudio/best",
+ 812:       "mediaType" to "audio",
+ 813:       "label" to "Alta calidad (192 kbps)",
+ 814:       "ext" to "mp3",
+ 815:       "qualityRank" to 192,
+ 816:       "audioQuality" to "192K",
+ 817:       "filesize" to 0L
+ 818:     ),
+ 819:     mapOf(
+ 820:       "id" to "std_audio_320",
+ 821:       "formatId" to "bestaudio/best",
+ 822:       "mediaType" to "audio",
+ 823:       "label" to "Máxima calidad (320 kbps)",
+ 824:       "ext" to "mp3",
+ 825:       "qualityRank" to 320,
+ 826:       "audioQuality" to "320K",
+ 827:       "filesize" to 0L
+ 828:     )
+ 829:   )
+ 830: 
+ 831:   private fun buildStandardPlaylistVideoFormats(): List> = listOf(
+ 832:     mapOf(
+ 833:       "id" to "std_video_360",
+ 834:       "formatId" to "bestvideo[height<=360]+bestaudio/best[height<=360]/best",
+ 835:       "mediaType" to "video",
+ 836:       "label" to "Rápido (360p)",
+ 837:       "ext" to "mp4",
+ 838:       "qualityRank" to 360,
+ 839:       "height" to 360,
+ 840:       "filesize" to 0L
+ 841:     ),
+ 842:     mapOf(
+ 843:       "id" to "std_video_480",
+ 844:       "formatId" to "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+ 845:       "mediaType" to "video",
+ 846:       "label" to "Estándar (480p)",
+ 847:       "ext" to "mp4",
+ 848:       "qualityRank" to 480,
+ 849:       "height" to 480,
+ 850:       "filesize" to 0L
+ 851:     ),
+ 852:     mapOf(
+ 853:       "id" to "std_video_720",
+ 854:       "formatId" to "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+ 855:       "mediaType" to "video",
+ 856:       "label" to "Alta calidad (720p)",
+ 857:       "ext" to "mp4",
+ 858:       "qualityRank" to 720,
+ 859:       "height" to 720,
+ 860:       "filesize" to 0L
+ 861:     ),
+ 862:     mapOf(
+ 863:       "id" to "std_video_1080",
+ 864:       "formatId" to "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+ 865:       "mediaType" to "video",
+ 866:       "label" to "Full HD (1080p)",
+ 867:       "ext" to "mp4",
+ 868:       "qualityRank" to 1080,
+ 869:       "height" to 1080,
+ 870:       "filesize" to 0L
+ 871:     )
+ 872:   )
+ 873: 
+ 874:   // Ejecuta una descarga real mediante yt-dlp en caché temporal y exporta al destino (Directo, SAF o MediaStore)
+ 875:   fun downloadMedia(
+ 876:     context: Context,
+ 877:     taskId: String,
+ 878:     rawUrl: String,
+ 879:     formatId: String,
+ 880:     mediaType: String,
+ 881:     audioQuality: String?,
+ 882:     targetDisplayPath: String,
+ 883:     onProgress: (Float, Long, String) -> Unit
+ 884:   ): Map<String, Any?> {
+ 885:     val url = normalizeUrl(rawUrl)
+ 886:     val detectedPlatform = detectPlatform(url)
+ 887: 
+ 888:     if (!hasStorageWritePermission(context)) {
+ 889:       return mapOf(
+ 890:         "ok" to false,
+ 891:         "errorCode" to "PERMISSION_DENIED",
+ 892:         "errorMessage" to "Permiso de almacenamiento no concedido. Selecciona tu carpeta de descargas para guardar archivos."
+ 893:       )
+ 894:     }
+ 895: 
+ 896:     if (!isNetworkAvailable(context)) {
+ 897:       return mapOf(
+ 898:         "ok" to false,
+ 899:         "errorCode" to "NO_INTERNET",
+ 900:         "errorMessage" to "Sin conexión a internet. Conéctate a una red e intenta reanudar."
+ 901:       )
+ 902:     }
+ 903: 
+ 904:     // Verifica al menos 25 MB libres antes de iniciar
+ 905:     val freeBytes = getAvailableSpaceBytes(context.cacheDir)
+ 906:     if (freeBytes < 25L * 1024L * 1024L) {
+ 907:       return mapOf(
+ 908:         "ok" to false,
+ 909:         "errorCode" to "NO_SPACE",
+ 910:         "errorMessage" to "Espacio insuficiente en el almacenamiento interno. Libera memoria e intenta de nuevo."
+ 911:       )
+ 912:     }
+ 913: 
+ 914:     val safeTaskDir = taskId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+ 915:     val tempDir = File(File(context.cacheDir, "snow_dl_tmp"), safeTaskDir).apply {
+ 916:       if (exists()) deleteRecursively()
+ 917:       mkdirs()
+ 918:     }
+ 919: 
+ 920:     return try {
+ 921:       ensureInitialized(context)
+ 922: 
+ 923:       val strategies: List<String?> = if (detectedPlatform == "YouTube") {
+ 924:         youtubeClientStrategies
+ 925:       } else {
+ 926:         listOf(null)
+ 927:       }
+ 928: 
+ 929:       var lastError: Exception? = null
+ 930:       var didForceUpdate = false
+ 931:       var succeeded = false
+ 932: 
+ 933:       var idx = 0
+ 934:       while (idx < strategies.size) {
+ 935:         val extractorArg = strategies[idx]
+ 936:         // Limpia archivos parciales de un intento fallido previo
+ 937:         tempDir.listFiles()?.forEach { it.deleteRecursively() }
+ 938: 
+ 939:         try {
+ 940:           val request = YoutubeDLRequest(url).apply {
+ 941:             addOption("--no-playlist")
+ 942:             addOption("--no-warnings")
+ 943:             addOption("--no-check-certificates")
+ 944:             addOption("--geo-bypass")
+ 945:             addOption("--retries", "3")
+ 946:             addOption("--fragment-retries", "3")
+ 947:             addOption("--newline")
+ 948:             addOption("--restrict-filenames")
+ 949:             if (extractorArg != null) {
+ 950:               addOption("--extractor-args", extractorArg)
+ 951:             }
+ 952:             addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
+ 953: 
+ 954:             if (mediaType == "audio") {
+ 955:               addOption("-f", formatId.ifBlank { "bestaudio[ext=m4a]/bestaudio/best" })
+ 956:               addOption("-x")
+ 957:               addOption("--audio-format", "mp3")
+ 958:               addOption("--audio-quality", audioQuality ?: "128K")
+ 959:               addOption("--embed-thumbnail")
+ 960:               addOption("--add-metadata")
+ 961:             } else {
+ 962:               addOption("-f", formatId.ifBlank { "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" })
+ 963:               addOption("--merge-output-format", "mp4")
+ 964:             }
+ 965:           }
+ 966: 
+ 967:           YoutubeDL.getInstance().execute(request, taskId) { progress, etaInSeconds, line ->
+ 968:             onProgress(progress, etaInSeconds, line)
+ 969:           }
+ 970:           succeeded = true
+ 971:           lastError = null
+ 972:           break
+ 973:         } catch (e: Exception) {
+ 974:           lastError = e
+ 975:           val rawErr = buildCauseChain(e).lowercase(Locale.US)
+ 976:           Log.w(TAG, "downloadMedia fallo (platform=$detectedPlatform, arg=$extractorArg): $rawErr")
+ 977:           if (rawErr.contains("canceled") || rawErr.contains("cancelled") || rawErr.contains("destroyed")) {
+ 978:             throw e
+ 979:           }
+ 980:           if (!didForceUpdate && isRetryableExtractorError(e)) {
+ 981:             didForceUpdate = true
+ 982:             if (maybeUpdateYtDlp(context, force = true)) {
+ 983:               continue
+ 984:             }
+ 985:           }
+ 986:         }
+ 987:         idx++
+ 988:       }
+ 989: 
+ 990:       if (!succeeded && lastError != null) {
+ 991:         throw lastError
+ 992:       }
+ 993: 
+ 994:       val downloadedFile = tempDir.listFiles()
+ 995:         ?.filter { f ->
+ 996:           f.isFile &&
+ 997:             !f.name.endsWith(".part") &&
+ 998:             !f.name.endsWith(".ytdl") &&
+ 999:             !f.name.endsWith(".temp") &&
+1000:             !f.name.endsWith(".jpg") &&
+1001:             !f.name.endsWith(".jpeg") &&
+1002:             !f.name.endsWith(".webp") &&
+1003:             !f.name.endsWith(".png")
+1004:         }
+1005:         ?.sortedByDescending { it.length() }
+1006:         ?.firstOrNull()
+1007:         ?: return mapOf(
+1008:           "ok" to false,
+1009:           "errorCode" to "EMPTY_OUTPUT",
+1010:           "errorMessage" to "yt-dlp finalizó pero no generó el archivo de salida."
+1011:         )
+1012: 
+1013:       val exported = exportDownloadedFile(
+1014:         context = context,
+1015:         sourceFile = downloadedFile,
+1016:         mediaType = mediaType,
+1017:         targetDisplayPath = targetDisplayPath
+1018:       )
+1019: 
+1020:       if (exported == null) {
+1021:         return mapOf(
+1022:           "ok" to false,
+1023:           "errorCode" to "PERMISSION_DENIED",
+1024:           "errorMessage" to "No se pudo guardar el archivo en la carpeta seleccionada. Revisa permisos."
+1025:         )
+1026:       }
+1027: 
+1028:       mapOf(
+1029:         "ok" to true,
+1030:         "filePath" to exported.first,
+1031:         "fileName" to exported.second
+1032:       )
+1033:     } catch (e: Exception) {
+1034:       val (code, msg) = classifyError(e, context, detectedPlatform)
+1035:       mapOf(
+1036:         "ok" to false,
+1037:         "errorCode" to code,
+1038:         "errorMessage" to msg
+1039:       )
+1040:     } finally {
+1041:       try {
+1042:         tempDir.deleteRecursively()
+1043:       } catch (_: Exception) { }
+1044:     }
+1045:   }
+1046: 
+1047:   private fun mimeTypeForFile(fileName: String, mediaType: String): String {
+1048:     val ext = fileName.substringAfterLast('.', "").lowercase(Locale.US)
+1049:     return when (ext) {
+1050:       "mp3" -> "audio/mpeg"
+1051:       "m4a" -> "audio/mp4"
+1052:       "opus" -> "audio/opus"
+1053:       "ogg" -> "audio/ogg"
+1054:       "flac" -> "audio/flac"
+1055:       "wav" -> "audio/wav"
+1056:       "mp4" -> "video/mp4"
+1057:       "mkv" -> "video/x-matroska"
+1058:       "webm" -> if (mediaType == "audio") "audio/webm" else "video/webm"
+1059:       else -> if (mediaType == "audio") "audio/mpeg" else "video/mp4"
+1060:     }
+1061:   }
+1062: 
+1063:   // Exporta el archivo desde caché temporal usando acceso directo, carpeta SAF (HyperOS) o MediaStore
+1064:   private fun exportDownloadedFile(
+1065:     context: Context,
+1066:     sourceFile: File,
+1067:     mediaType: String,
+1068:     targetDisplayPath: String
+1069:   ): Pair<String, String>? {
+1070:     val canUseDirect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+1071:       Environment.isExternalStorageManager()
+1072:     } else {
+1073:       ContextCompat.checkSelfPermission(
+1074:         context,
+1075:         Manifest.permission.WRITE_EXTERNAL_STORAGE
+1076:       ) == PackageManager.PERMISSION_GRANTED
+1077:     }
+1078: 
+1079:     // 1. Acceso directo al sistema de archivos si All Files Access (o Android <=10) está concedido
+1080:     if (canUseDirect) {
+1081:       try {
+1082:         val destDir = resolveTargetDirectory(targetDisplayPath)
+1083:         if (destDir.exists() || destDir.mkdirs()) {
+1084:           val destFile = resolveUniqueFile(destDir, sourceFile.name)
+1085:           FileInputStream(sourceFile).use { input ->
+1086:             FileOutputStream(destFile).use { output -> input.copyTo(output) }
+1087:           }
+1088:           MediaScannerConnection.scanFile(
+1089:             context.applicationContext,
+1090:             arrayOf(destFile.absolutePath),
+1091:             arrayOf(mimeTypeForFile(destFile.name, mediaType)),
+1092:             null
+1093:           )
+1094:           return Pair(destFile.absolutePath, destFile.name)
+1095:         }
+1096:       } catch (e: Exception) {
+1097:         Log.w(TAG, "Fallo escritura directa, intentando SAF/MediaStore: ${e.message}")
+1098:       }
+1099:     }
+1100: 
+1101:     // 2. Escritura vía carpeta SAF autorizada (funciona sin bloqueos en HyperOS y Android 11–15)
+1102:     val safTreeUri = getPersistedSafTreeUri(context)
+1103:     if (safTreeUri != null) {
+1104:       val safResult = exportToSafTree(context, safTreeUri, sourceFile, mediaType, targetDisplayPath)
+1105:       if (safResult != null) return safResult
+1106:     }
+1107: 
+1108:     // 3. Respaldo oficial vía MediaStore en Android 10+ (nunca requiere MANAGE_EXTERNAL_STORAGE)
+1109:     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+1110:       return exportToMediaStore(context, sourceFile, mediaType)
+1111:     }
+1112: 
+1113:     return null
+1114:   }
+1115: 
+1116:   private fun resolveUniqueFile(dir: File, originalName: String): File {
+1117:     var candidate = File(dir, originalName)
+1118:     if (!candidate.exists()) return candidate
+1119:     val base = originalName.substringBeforeLast('.', originalName)
+1120:     val ext = originalName.substringAfterLast('.', "")
+1121:     var index = 1
+1122:     while (candidate.exists() && index < 500) {
+1123:       val nextName = if (ext.isNotEmpty()) "${base}_($index).$ext" else "${base}_($index)"
+1124:       candidate = File(dir, nextName)
+1125:       index++
+1126:     }
+1127:     return candidate
+1128:   }
+1129: 
+1130:   private fun exportToSafTree(
+1131:     context: Context,
+1132:     treeUri: Uri,
+1133:     sourceFile: File,
+1134:     mediaType: String,
+1135:     targetDisplayPath: String
+1136:   ): Pair<String, String>? {
+1137:     return try {
+1138:       val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+1139:       val treeTail = rootDocId.substringAfterLast(':').substringAfterLast('/').trim()
+1140:       val rawSegments = cleanRelativePath(targetDisplayPath)
+1141:         .split('/')
+1142:         .map { it.trim() }
+1143:         .filter { it.isNotEmpty() }
+1144: 
+1145:       // Evita duplicar carpetas si el usuario ya eligió la carpeta raíz (ej. "Snow beats" o "Snow beats audio")
+1146:       val matchIdx = rawSegments.indexOfLast { it.equals(treeTail, ignoreCase = true) }
+1147:       val subSegments = if (matchIdx >= 0) {
+1148:         rawSegments.drop(matchIdx + 1)
+1149:       } else {
+1150:         // Si el usuario eligió una carpeta genérica (ej. Music), crea una subcarpeta ordenada
+
+
+```
+
+```python
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    root = z.namelist()[0].split('/')[0]
+    dl = z.read(f"{root}/src/ui/screens/DownloadsTab.tsx").decode('utf-8', errors='replace')
+    print("DownloadsTab.tsx lines:", dl.count('\n'))
+    lines = dl.splitlines()
+    for i, l in enumerate(lines[:140], 1):
+        print(f"{i:4d}: {l}")
+    print("="*40)
+    # Search for extractMediaInfo, downloadMedia, previewStreamUrl, WebView
+    for i, l in enumerate(lines, 1):
+        if any(k in l for k in ["extractMediaInfo", "downloadMedia", "previewStreamUrl", "WebView", "handleAnalyze", "handleStartDownload", "VideoView", "useVideoPlayer"]):
+            print(f"{i:4d}: {l}")
+
+
+```
+
+```text
+DownloadsTab.tsx lines: 1557
+   1: import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+   2: import {
+   3:     ActivityIndicator,
+   4:     AppState,
+   5:     Image,
+   6:     Modal,
+   7:     Platform,
+   8:     ScrollView,
+   9:     StyleSheet,
+  10:     Text,
+  11:     TextInput,
+  12:     TouchableOpacity,
+  13:     View,
+  14: } from 'react-native';
+  15: import { useVideoPlayer, VideoView } from 'expo-video';
+  16: import { createAudioPlayer, AudioPlayer } from 'expo-audio';
+  17: import {
+  18:     AlertCircle,
+  19:     ArrowUp,
+  20:     CheckCircle2,
+  21:     Clock,
+  22:     Download,
+  23:     Film,
+  24:     FolderLock,
+  25:     ListMusic,
+  26:     Music,
+  27:     Pause,
+  28:     Play,
+  29:     RotateCcw,
+  30:     Search,
+  31:     Trash2,
+  32:     Volume2,
+  33:     VolumeX,
+  34:     X,
+  35:     XCircle,
+  36: } from 'lucide-react-native';
+  37: import {
+  38:     addDownloadProgressListener,
+  39:     cancelDownload,
+  40:     DownloadFormatOption,
+  41:     downloadMedia,
+  42:     ExtractedMediaInfo,
+  43:     extractMediaInfo,
+  44:     hasStorageWritePermission,
+  45:     PlaylistDownloadEntry,
+  46:     requestStorageWritePermission,
+  47: } from '../../../modules/snow-metadata';
+  48: import { getDownloadPaths } from '../../storage/downloadSettings';
+  49: import { useTheme } from '../../theme/ThemeContext';
+  50: import { usePlayer } from '../../audio-engine/PlayerContext';
+  51: import { DownloadFormatSheet } from '../components/DownloadFormatSheet';
+  52: import { PlaylistDownloadModal } from '../components/PlaylistDownloadModal';
+  53: 
+  54: type QueueItemStatus = 'downloading' | 'queued' | 'completed' | 'cancelled' | 'error';
+  55: 
+  56: interface DownloadQueueItem {
+  57:     id: string;
+  58:     url: string;
+  59:     title: string;
+  60:     thumbnail?: string | null;
+  61:     format: DownloadFormatOption;
+  62:     targetPath: string;
+  63:     status: QueueItemStatus;
+  64:     progress: number;
+  65:     etaSeconds: number;
+  66:     errorCode?: string;
+  67:     errorMessage?: string;
+  68:     savedFileName?: string;
+  69: }
+  70: 
+  71: interface DownloadsTabProps {
+  72:     isActive: boolean;
+  73:     onDownloadCompleted: () => void;
+  74: }
+  75: 
+  76: const SUPPORTED_PLATFORMS = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'X'] as const;
+  77: 
+  78: function detectPlatformFromUrl(raw: string): string | null {
+  79:     const trimmed = raw.trim().toLowerCase();
+  80:     if (!trimmed) return null;
+  81:     if (trimmed.includes('youtube.com') || trimmed.includes('youtu.be')) return 'YouTube';
+  82:     if (trimmed.includes('instagram.com') || trimmed.includes('instagr.am')) return 'Instagram';
+  83:     if (trimmed.includes('tiktok.com')) return 'TikTok';
+  84:     if (trimmed.includes('facebook.com') || trimmed.includes('fb.watch') || trimmed.includes('fb.com'))
+  85:         return 'Facebook';
+  86:     if (trimmed.includes('x.com') || trimmed.includes('twitter.com') || trimmed.includes('t.co'))
+  87:         return 'X';
+  88:     return null;
+  89: }
+  90: 
+  91: function formatEta(seconds: number): string {
+  92:     if (!seconds || seconds <= 0 || !Number.isFinite(seconds)) return '';
+  93:     const s = Math.floor(seconds);
+  94:     const m = Math.floor(s / 60);
+  95:     const rem = s % 60;
+  96:     return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
+  97: }
+  98: 
+  99: // Reproductor streaming de vista previa para videos (silenciado por defecto con botón Silenciar/Desilenciar)
+ 100: const StreamingVideoPreview: React.FC<{
+ 101:     streamUrl: string;
+ 102:     isActive: boolean;
+ 103: }> = React.memo(({ streamUrl, isActive }) => {
+ 104:     const [muted, setMuted] = useState(true);
+ 105:     const player = useVideoPlayer(streamUrl, (p) => {
+ 106:         p.loop = true;
+ 107:         p.muted = true;
+ 108:         if (isActive) {
+ 109:             p.play();
+ 110:         }
+ 111:     });
+ 112: 
+ 113:     useEffect(() => {
+ 114:         try {
+ 115:             player.muted = muted;
+ 116:         } catch { }
+ 117:     }, [player, muted]);
+ 118: 
+ 119:     useEffect(() => {
+ 120:         try {
+ 121:             if (isActive) {
+ 122:                 player.play();
+ 123:             } else {
+ 124:                 player.pause();
+ 125:             }
+ 126:         } catch { }
+ 127:     }, [player, isActive]);
+ 128: 
+ 129:     return (
+ 130:         <View style={styles.videoPreviewBox}>
+ 131:             <VideoView
+ 132:                 player={player}
+ 133:                 style={styles.videoView}
+ 134:                 contentFit="contain"
+ 135:                 nativeControls
+ 136:             />
+ 137:             <TouchableOpacity
+ 138:                 style={styles.muteFloatingBtn}
+ 139:                 activeOpacity={0.8}
+ 140:                 onPress={() => setMuted((prev) => !prev)}
+========================================
+  15: import { useVideoPlayer, VideoView } from 'expo-video';
+  41:     downloadMedia,
+  43:     extractMediaInfo,
+ 105:     const player = useVideoPlayer(streamUrl, (p) => {
+ 131:             <VideoView
+ 356:                 const res = await downloadMedia({
+ 448:                 const info = await extractMediaInfo(trimmed);
+ 766:                             ) : mediaInfo.isAudioOnly && mediaInfo.previewStreamUrl ? (
+ 768:                                     streamUrl={mediaInfo.previewStreamUrl}
+ 774:                             ) : mediaInfo.previewStreamUrl ? (
+ 777:                                         streamUrl={mediaInfo.previewStreamUrl}
+
+
+```
+
+```python
+import zipfile
+
+zp = "samuel1390/snow-beats"
+with zipfile.ZipFile(zp, 'r') as z:
+    root = z.namelist()[0].split('/')[0]
+    mod = z.read(f"{root}/modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowMetadataModule.kt").decode('utf-8', errors='replace')
+    for i, l in enumerate(mod.splitlines(), 1):
+        if any(k in l for k in ["extractMediaInfo", "downloadMedia", "cancelDownload", "AsyncFunction", "Events"]):
+            print(f"{i:4d}: {l}")
+
+
+```
+
+```text
+  50:     Events("onMediaAction", "onDownloadProgress")
+  86:     AsyncFunction("readTrackTags") { uriText: String, trackId: String ->
+  87:       val ctx = appContext.reactContext ?: return@AsyncFunction null
+ 141:     AsyncFunction("readTrackLyrics") { uriText: String ->
+ 142:       val ctx = appContext.reactContext ?: return@AsyncFunction null
+ 147:           return@AsyncFunction companionLrc.trim()
+ 152:           return@AsyncFunction embedded.trim()
+ 162:     AsyncFunction("renderShareCard") { options: Map<String, Any?> ->
+ 163:       val ctx = appContext.reactContext ?: return@AsyncFunction null
+ 172:     AsyncFunction("requestNotificationPermission") {
+ 173:       val ctx = appContext.reactContext ?: return@AsyncFunction false
+ 174:       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@AsyncFunction true
+ 179:       if (granted) return@AsyncFunction true
+ 192:     AsyncFunction("updateMediaNotification") { payload: Map<String, Any?> ->
+ 193:       val ctx = appContext.reactContext ?: return@AsyncFunction false
+ 220:     AsyncFunction("dismissMediaNotification") {
+ 221:       val ctx = appContext.reactContext ?: return@AsyncFunction false
+ 234:     AsyncFunction("sendEmailWithAttachments") { to: String, subject: String, body: String, imageUris: List<String> ->
+ 235:       val ctx = appContext.reactContext ?: return@AsyncFunction false
+ 240:     AsyncFunction("hasStorageWritePermission") {
+ 241:       val ctx = appContext.reactContext ?: return@AsyncFunction false
+ 246:     AsyncFunction("requestStorageWritePermission") { promise: Promise ->
+ 250:         return@AsyncFunction
+ 254:         return@AsyncFunction
+ 271:     AsyncFunction("extractMediaInfo") { url: String ->
+ 272:       val ctx = appContext.reactContext ?: return@AsyncFunction mapOf(
+ 277:       SnowDownloaderEngine.extractMediaInfo(ctx, url)
+ 281:     AsyncFunction("downloadMedia") { options: Map<String, Any?> ->
+ 282:       val ctx = appContext.reactContext ?: return@AsyncFunction mapOf(
+ 295:       SnowDownloaderEngine.downloadMedia(
+ 323:     AsyncFunction("cancelDownload") { taskId: String ->
+ 324:       SnowDownloaderEngine.cancelDownload(taskId)
+
+
+```
+
+Al revisar el repositorio de **Snow Beats**, tu proyecto ya tiene una base nativa sólida en `modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowDownloaderEngine.kt` con `youtubedl-android` (`yt-dlp` + `FFmpeg`) y `DownloadsTab.tsx`. El prompt de abajo está redactado específicamente sobre esa arquitectura actual: conserva lo que ya funciona (SAF en HyperOS, MediaStore, cola de descargas, `DownloadFormatSheet`) y le indica a Neon exactamente qué archivos modificar y qué piezas faltantes construir para los tres pasos en **YouTube, Instagram, TikTok, Facebook y X**.
+
+Copia y pega este prompt directamente en AI Studio:
+
+```markdown
+Necesito que mejores y blindes el apartado de **Descargas** de **Snow Beats** (Expo SDK 58 / React Native + módulo nativo Kotlin `SnowMetadata`) para que soporte extracciones, vistas previas en streaming y descargas confiables **sin pedir login ni credenciales al usuario** en **YouTube, Instagram, TikTok, Facebook y X**.
+
+### Contexto actual del repositorio
+- Motor nativo actual: `modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowDownloaderEngine.kt` (ya usa `io.github.junkfood02.youtubedl-android:library:0.18.1` y `ffmpeg:0.18.1`).
+- Puente Expo: `modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowMetadataModule.kt` y `modules/snow-metadata/index.ts`.
+- Interfaz de descargas: `src/ui/screens/DownloadsTab.tsx`, `src/ui/components/DownloadFormatSheet.tsx` y `src/ui/components/PlaylistDownloadModal.tsx`.
+- Regla estricta del repo (`AGENTS.md`): NO edites manualmente carpetas generadas `android/` de la app principal; todo el código nativo debe vivir exclusivamente dentro de `modules/snow-metadata/android/` y el código JS/TS dentro de `src/` y `modules/snow-metadata/index.ts`.
+
+Implementa los siguientes **3 pasos en detalle**, manteniendo intactos el sistema de exportación actual (acceso directo, SAF para HyperOS y MediaStore), el soporte de playlists y los eventos `onDownloadProgress`:
+
+---
+
+### PASO 1: Consolidar la ejecución 100% local en el cliente + blindar el streaming de vista previa y headers
+1. **Cero servidores externos:** Toda extracción de metadatos, resolución de formatos, streaming de vista previa y descarga debe ejecutarse estrictamente en el dispositivo Android del usuario (usando su IP residencial/móvil real).
+2. **Propagación de headers HTTP para la vista previa (`403 Forbidden` fix):**
+   - Actualmente `pickPreviewStream()` en `SnowDownloaderEngine.kt` solo devuelve la URL cruda y `StreamingVideoPreview` en `DownloadsTab.tsx` la pasa directamente a `useVideoPlayer(streamUrl)`. En plataformas como TikTok, Instagram, Facebook y X, los CDNs exigen los mismos headers (`User-Agent`, `Referer`, `Cookie`) que usó el extractor o rechazan la reproducción con `403`.
+   - Modifica `ExtractedMediaInfo` (en Kotlin y en `modules/snow-metadata/index.ts`) para devolver también:
+     - `previewHeaders?: Record<string, string>` (extraídos de `http_headers` del formato elegido en `yt-dlp` o capturados por el WebView oculto).
+     - `extractionSource?: 'yt-dlp' | 'embed' | 'webview'`.
+     - `directStreamUrl?: string | null` (cuando el respaldo WebView/embed capture una URL directa de `.mp4` o `.m3u8`).
+   - Actualiza `StreamingVideoPreview` y el reproductor de audio de vista previa en `src/ui/screens/DownloadsTab.tsx` para pasar `{ uri: streamUrl, headers: previewHeaders }` a `expo-video` (`useVideoPlayer`) cuando existan headers, con un fallback visual limpio a la miniatura si el stream remoto falla al cargar.
+3. **Soporte de descarga con headers y transcodificación local con FFmpeg:**
+   - Actualiza `DownloadMediaOptions` para aceptar opcionalmente `headers?: Record<string, string>` y `directStreamUrl?: string`.
+   - Si la plataforma (como Instagram, TikTok, Facebook o X) solo entrega **una resolución original** pero el usuario solicita extraer **MP3** (64/128/192/320 kbps) o una resolución menor, asegúrate de que `downloadMedia` pueda descargar el flujo disponible y procesarlo localmente con FFmpeg sin fallar por `requested format is not available`.
+
+---
+
+### PASO 2: Estrategias de cliente móvil spoofeado por plataforma (YouTube, Instagram, TikTok, Facebook y X)
+Actualmente en `SnowDownloaderEngine.kt`, solo YouTube tiene `youtubeClientStrategies` y el resto de plataformas ejecutan un único intento con `listOf(null)`. Reemplaza eso por un sistema estructurado de **estrategias en cascada por plataforma** (`data class ExtractionStrategy(val extractorArgs: String?, val userAgent: String?, val referer: String?, val extraOptions: List<Pair<String, String?>>)`), aplicado tanto en `extractMediaInfo` como en `downloadMedia`:
+
+1. **YouTube (`youtube.com`, `youtu.be`, `music.youtube.com`):**
+   - Amplía la cascada de clientes sin login ni cookies en este orden:
+     1. `youtube:player_client=android,ios`
+     2. `youtube:player_client=android_vr`
+     3. `youtube:player_client=tv,mweb`
+     4. Fallback por defecto (`null`).
+   - Mantén el auto-update de `yt-dlp` cada 24h y el reintento forzado ante errores `403`, `sign in`, `bot`, `nsig`, `sabr` o `requested format is not available`.
+2. **Instagram (`instagram.com`, `instagr.am`):**
+   - Normaliza URLs eliminando parámetros de rastreo (`?igsh=`, `?dmpr=`, `?avpt=`, etc.) y unificando `/reels/` -> `/reel/`.
+   - Estrategia 1: `yt-dlp` con `User-Agent` móvil Android/iOS realista + `--add-header "Referer:https://www.instagram.com/"` + `--add-header "Accept-Language:es-ES,es;q=0.9,en;q=0.8"`.
+   - Estrategia 2: Si el `CookieManager` local de Android tiene cookies válidas para `instagram.com` (generadas de forma pasiva por el WebView), pásalas mediante `--add-header "Cookie:..."` en el segundo intento.
+   - Estrategia 3: Respaldo público `tryInstagramPublicEmbedFallback` (`/embed/captioned/`).
+   - Estrategia 4: Si todo lo anterior falla por `login required`, `429` o bloqueo anónimo, disparar el **WebView oculto nativo (Paso 3)**.
+3. **TikTok (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`):**
+   - Resuelve redirecciones de enlaces cortos (`vm.tiktok.com` / `vt.tiktok.com`) antes o durante la extracción.
+   - Estrategia 1: `yt-dlp` con `User-Agent` móvil moderno y configuración que priorice streams **sin marca de agua**.
+   - Estrategia 2: Reintento con `--extractor-args "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com"` (o fallback estándar sin args).
+   - Estrategia 3: Si falla por bloqueo anti-bot o respuesta vacía, pasar al **WebView oculto nativo (Paso 3)**.
+4. **Facebook (`facebook.com`, `fb.watch`, `fb.com`):**
+   - Soporta enlaces de Reels, Watch, videos normales y enlaces compartidos (`/share/r/`, `/share/v/`, `fb.watch`) resolviendo redirecciones HTTP si es necesario.
+   - Estrategia 1: `yt-dlp` con `User-Agent` móvil (`Mobile Safari` / Chrome Android) + `Referer: https://m.facebook.com/`.
+   - Estrategia 2: `yt-dlp` con `User-Agent` de escritorio (Facebook a menudo expone variantes HD únicamente al UA desktop).
+   - Estrategia 3: Si exige login o falla la extracción, pasar al **WebView oculto nativo (Paso 3)**.
+5. **X / Twitter (`x.com`, `twitter.com`, `t.co`):**
+   - Resuelve enlaces acortados `t.co` y normaliza dominios entre `x.com` y `twitter.com` si el primer intento falla.
+   - Estrategia 1: `yt-dlp` estándar con `User-Agent` moderno + `Referer: https://x.com/`.
+   - Estrategia 2: Reintento con `--extractor-args "twitter:api=syndication"` (suele funcionar sin login para tweets públicos).
+   - Estrategia 3: Si falla por rate-limit o bloqueo, pasar al **WebView oculto nativo (Paso 3)**.
+
+---
+
+### PASO 3: WebView oculto nativo en Kotlin como motor de respaldo (Sniffing de red + inyección JS)
+En lugar de depender de un WebView visible o de librerías JS limitadas, implementa un extractor nativo dedicado en Kotlin: `modules/snow-metadata/android/src/main/java/com/snowbeats/metadata/SnowHiddenWebViewExtractor.kt`.
+
+1. **Ciclo de vida seguro offscreen:**
+   - Crea e inicializa un `android.webkit.WebView` estrictamente en el hilo principal (`Handler(Looper.getMainLooper())`) usando `context.applicationContext` (o `currentActivity` si existe, sin adjuntarlo a la jerarquía visible de la UI).
+   - Configura `javaScriptEnabled = true`, `domStorageEnabled = true`, `mediaPlaybackRequiresUserGesture = false`, `mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW`, cookies habilitadas (`CookieManager.getInstance().setAcceptCookie(true)`) y un `User-Agent` móvil real (sin el token `; wv` de WebView para evitar detección anti-bot).
+   - Usa un `CountDownLatch` / `CompletableFuture` con un timeout máximo de **14 segundos** para no colgar `extractMediaInfo`.
+   - **Obligatorio:** En un bloque `finally` en el hilo principal, ejecuta `stopLoading()`, `loadUrl("about:blank")`, `clearHistory()` y `destroy()` para garantizar cero fugas de memoria.
+
+2. **Doble mecanismo de captura dentro del WebView oculto:**
+   - **Interceptación de peticiones de red (`WebViewClient.shouldInterceptRequest`):**
+     - Inspecciona todas las URLs de sub-recursos solicitados por la página.
+     - Detecta URLs de video/manifiestos reales: `.mp4`, `.m3u8`, `.mpd`, o hosts CDN conocidos (`cdninstagram.com`, `fbcdn.net`, `tiktokcdn.com`, `video.twimg.com`) filtrando falsos positivos (anuncios, píxeles de tracking, `.jpg`, `.webp`, `.css`, `.js`, storyboards).
+     - Guarda la URL capturada junto con sus `requestHeaders` (`User-Agent`, `Referer`, `Origin`) y las cookies obtenidas vía `CookieManager.getInstance().getCookie(url)`.
+   - **Inyección de JavaScript (`onPageFinished` + `evaluateJavascript`):**
+     - Inyecta un script defensivo que busque:
+       1. `<video src>` y `<video><source src>` (y ejecute `video.muted = true; video.play().catch(()=>{})` para forzar que reproductores SPA de Instagram/TikTok/Facebook/X disparen la petición del stream).
+       2. Metadatos OpenGraph: `meta[property="og:video"]`, `meta[property="og:video:secure_url"]`, `meta[property="og:title"]`, `meta[property="og:image"]` y `document.title`.
+     - Re-evalúa el DOM brevemente (ej. a los 1.5s y 3.5s) hasta capturar un stream válido o agotar el timeout.
+
+3. **Integración completa con `extractMediaInfo` y `downloadMedia`:**
+   - Cuando el WebView oculto capture una URL válida, `extractMediaInfo` debe construir un `ExtractedMediaInfo` completo (`ok = true`, `extractionSource = "webview"`, `title`, `thumbnail`, `previewStreamUrl`, `previewHeaders`, `directStreamUrl`, más las opciones de `videoFormats` y `audioFormats` estándar para que `DownloadFormatSheet` funcione exactamente igual que con `yt-dlp`).
+   - En `downloadMedia`: si recibe `directStreamUrl` (o si `yt-dlp` falla con la URL original de la red social), intenta primero descargar pasando la `directStreamUrl` + los `headers` (`--add-header` / `--user-agent` / `--referer`) a `yt-dlp` (para aprovechar su manejo de HLS `.m3u8`, progreso en tiempo real y conversión a MP3 con FFmpeg). Si es un `.mp4` directo y `yt-dlp` falla, descarga el flujo directamente con `HttpURLConnection` reportando progreso a `onProgress` y, si `mediaType == "audio"`, extrae el MP3 con FFmpeg.
+   - Si incluso el WebView oculto detecta que el contenido es estrictamente privado o exige cuenta (sin ningún stream público), devuelve un `errorCode` claro (`LOGIN_REQUIRED` o `PRIVATE_CONTENT`) con un mensaje honesto en español para que `DownloadsTab.tsx` lo muestre al usuario.
+
+---
+
+### Requisitos de calidad y validación
+- No rompas ninguna funcionalidad existente de `SnowMetadataModule` (lectura de ID3, letras `.lrc`, notificaciones multimedia, `renderShareCard`, permisos SAF/MediaStore).
+- Actualiza los textos de estado en `src/ui/screens/DownloadsTab.tsx` para informar de forma clara durante el análisis y mostrar el mensaje apropiado si una publicación es privada.
+- Al finalizar, valida tipos con `npx tsc --noEmit` y verifica que no queden errores de compilación en Kotlin ni en TypeScript.
+
+```

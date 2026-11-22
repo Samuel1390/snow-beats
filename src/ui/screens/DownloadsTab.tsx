@@ -60,6 +60,8 @@ interface DownloadQueueItem {
     thumbnail?: string | null;
     format: DownloadFormatOption;
     targetPath: string;
+    headers?: Record<string, string>;
+    directStreamUrl?: string | null;
     status: QueueItemStatus;
     progress: number;
     etaSeconds: number;
@@ -75,16 +77,41 @@ interface DownloadsTabProps {
 
 const SUPPORTED_PLATFORMS = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'X'] as const;
 
+// Desenvuelve redirecciones de Google Search (google.com/url?...&url=...) antes de detectar la plataforma
+function unwrapUrlForDetection(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    try {
+        const lower = trimmed.toLowerCase();
+        if (lower.includes('google.com/url') || lower.includes('google.co/url')) {
+            const match = trimmed.match(/[?&](?:url|q)=([^&]+)/i);
+            if (match?.[1]) {
+                const decoded = decodeURIComponent(match[1]);
+                if (/^https?:\/\//i.test(decoded)) {
+                    return decoded;
+                }
+            }
+        }
+    } catch { }
+    return trimmed;
+}
+
 function detectPlatformFromUrl(raw: string): string | null {
-    const trimmed = raw.trim().toLowerCase();
-    if (!trimmed) return null;
-    if (trimmed.includes('youtube.com') || trimmed.includes('youtu.be')) return 'YouTube';
-    if (trimmed.includes('instagram.com') || trimmed.includes('instagr.am')) return 'Instagram';
-    if (trimmed.includes('tiktok.com')) return 'TikTok';
-    if (trimmed.includes('facebook.com') || trimmed.includes('fb.watch') || trimmed.includes('fb.com'))
+    const normalized = unwrapUrlForDetection(raw).toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('youtube.com') || normalized.includes('youtu.be')) return 'YouTube';
+    if (normalized.includes('instagram.com') || normalized.includes('instagr.am')) return 'Instagram';
+    if (normalized.includes('tiktok.com')) return 'TikTok';
+    if (
+        normalized.includes('facebook.com') ||
+        normalized.includes('fb.watch') ||
+        normalized.includes('fb.com')
+    ) {
         return 'Facebook';
-    if (trimmed.includes('x.com') || trimmed.includes('twitter.com') || trimmed.includes('t.co'))
+    }
+    if (normalized.includes('x.com') || normalized.includes('twitter.com') || normalized.includes('t.co')) {
         return 'X';
+    }
     return null;
 }
 
@@ -96,19 +123,45 @@ function formatEta(seconds: number): string {
     return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
 }
 
-// Reproductor streaming de vista previa para videos (silenciado por defecto con botón Silenciar/Desilenciar)
+// Reproductor streaming de vista previa para videos (inyecta headers del extractor y cae a miniatura si el CDN bloquea streaming)
 const StreamingVideoPreview: React.FC<{
     streamUrl: string;
+    headers?: Record<string, string>;
+    thumbnail?: string | null;
     isActive: boolean;
-}> = React.memo(({ streamUrl, isActive }) => {
+}> = React.memo(({ streamUrl, headers, thumbnail, isActive }) => {
     const [muted, setMuted] = useState(true);
-    const player = useVideoPlayer(streamUrl, (p) => {
+    const [streamFailed, setStreamFailed] = useState(false);
+
+    const videoSource = useMemo(() => {
+        if (headers && Object.keys(headers).length > 0) {
+            return { uri: streamUrl, headers };
+        }
+        return streamUrl;
+    }, [streamUrl, headers]);
+
+    useEffect(() => {
+        setStreamFailed(false);
+    }, [streamUrl]);
+
+    const player = useVideoPlayer(videoSource, (p) => {
         p.loop = true;
         p.muted = true;
         if (isActive) {
             p.play();
         }
     });
+
+    useEffect(() => {
+        const sub = player.addListener('statusChange', (payload) => {
+            if (payload.status === 'error') {
+                setStreamFailed(true);
+            } else if (payload.status === 'readyToPlay') {
+                setStreamFailed(false);
+            }
+        });
+        return () => sub.remove();
+    }, [player]);
 
     useEffect(() => {
         try {
@@ -118,13 +171,39 @@ const StreamingVideoPreview: React.FC<{
 
     useEffect(() => {
         try {
-            if (isActive) {
+            if (isActive && !streamFailed) {
                 player.play();
             } else {
                 player.pause();
             }
         } catch { }
-    }, [player, isActive]);
+    }, [player, isActive, streamFailed]);
+
+    if (streamFailed) {
+        return (
+            <View style={styles.videoPreviewBox}>
+                {thumbnail ? (
+                    <Image
+                        source={{ uri: thumbnail }}
+                        style={styles.videoFallbackImg}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <View style={[styles.videoFallbackImg, styles.coverFallback]}>
+                        <Film size={34} color="#9CA3AF" />
+                    </View>
+                )}
+                <View style={styles.videoFallbackOverlay}>
+                    <View style={styles.videoFallbackPill}>
+                        <Film size={13} color="#FACC15" />
+                        <Text style={styles.videoFallbackPillText}>
+                            Vista previa protegida · Lista para descargar
+                        </Text>
+                    </View>
+                </View>
+            </View>
+        );
+    }
 
     return (
         <View style={styles.videoPreviewBox}>
@@ -152,20 +231,25 @@ const StreamingVideoPreview: React.FC<{
     );
 });
 
-// Reproductor streaming automático para enlaces de solo audio
+// Reproductor streaming automático para enlaces de solo audio (propaga headers HTTP si los requiere el CDN)
 const StreamingAudioPreview: React.FC<{
     streamUrl: string;
+    headers?: Record<string, string>;
     title: string;
     uploader: string;
     thumbnail?: string | null;
     isActive: boolean;
-}> = React.memo(({ streamUrl, title, uploader, thumbnail, isActive }) => {
+}> = React.memo(({ streamUrl, headers, title, uploader, thumbnail, isActive }) => {
     const audioRef = useRef<AudioPlayer | null>(null);
     const [playing, setPlaying] = useState(true);
     const [muted, setMuted] = useState(false);
 
     useEffect(() => {
-        const player = createAudioPlayer({ uri: streamUrl });
+        const audioSource =
+            headers && Object.keys(headers).length > 0
+                ? { uri: streamUrl, headers }
+                : { uri: streamUrl };
+        const player = createAudioPlayer(audioSource);
         audioRef.current = player;
         if (isActive) {
             try {
@@ -180,7 +264,7 @@ const StreamingAudioPreview: React.FC<{
             } catch { }
             audioRef.current = null;
         };
-    }, [streamUrl]);
+    }, [streamUrl, headers]);
 
     useEffect(() => {
         const p = audioRef.current;
@@ -360,6 +444,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     mediaType: nextItem.format.mediaType,
                     audioQuality: nextItem.format.audioQuality,
                     targetPath: nextItem.targetPath,
+                    headers: nextItem.headers,
+                    directStreamUrl: nextItem.directStreamUrl ?? undefined,
                 });
 
                 setQueue((prev) =>
@@ -494,7 +580,13 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
 
         const enqueueItems = useCallback(
             async (
-                items: { url: string; title: string; thumbnail?: string | null }[],
+                items: {
+                    url: string;
+                    title: string;
+                    thumbnail?: string | null;
+                    headers?: Record<string, string>;
+                    directStreamUrl?: string | null;
+                }[],
                 format: DownloadFormatOption
             ) => {
                 const paths = await getDownloadPaths();
@@ -506,6 +598,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     url: entry.url,
                     title: entry.title,
                     thumbnail: entry.thumbnail,
+                    headers: entry.headers,
+                    directStreamUrl: entry.directStreamUrl,
                     format,
                     targetPath,
                     status: 'queued',
@@ -528,6 +622,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 url: mediaInfo.url!,
                                 title: mediaInfo.title || 'Archivo descargado',
                                 thumbnail: mediaInfo.thumbnail,
+                                headers: mediaInfo.previewHeaders,
+                                directStreamUrl: mediaInfo.directStreamUrl,
                             },
                         ],
                         format
@@ -719,15 +815,15 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                         </View>
                     )}
 
-                    {/* Estado cargando análisis yt-dlp */}
+                    {/* Estado cargando análisis local + respaldo WebView */}
                     {searching && (
                         <View style={[styles.loadingCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                             <ActivityIndicator size="large" color="#FACC15" />
                             <Text style={[styles.loadingText, { color: fgColor }]}>
-                                Analizando enlace con yt-dlp...
+                                Analizando enlace (motor local + respaldo)...
                             </Text>
                             <Text style={[styles.loadingSub, { color: mutedColor }]}>
-                                Obteniendo vista previa en streaming y formatos disponibles
+                                Extrayendo vista previa, encabezados y formatos disponibles
                             </Text>
                         </View>
                     )}
@@ -766,6 +862,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             ) : mediaInfo.isAudioOnly && mediaInfo.previewStreamUrl ? (
                                 <StreamingAudioPreview
                                     streamUrl={mediaInfo.previewStreamUrl}
+                                    headers={mediaInfo.previewHeaders}
                                     title={mediaInfo.title || 'Audio'}
                                     uploader={mediaInfo.uploader || mediaInfo.platform || 'Streaming'}
                                     thumbnail={mediaInfo.thumbnail}
@@ -775,6 +872,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 <>
                                     <StreamingVideoPreview
                                         streamUrl={mediaInfo.previewStreamUrl}
+                                        headers={mediaInfo.previewHeaders}
+                                        thumbnail={mediaInfo.thumbnail}
                                         isActive={isActive}
                                     />
                                     <View style={styles.previewMetaRow}>
@@ -783,6 +882,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                         </Text>
                                         <Text style={[styles.previewUploader, { color: mutedColor }]} numberOfLines={1}>
                                             {mediaInfo.uploader} · {mediaInfo.platform}
+                                            {mediaInfo.extractionSource && mediaInfo.extractionSource !== 'yt-dlp'
+                                                ? ' · Modo respaldo'
+                                                : ''}
                                         </Text>
                                     </View>
                                 </>
@@ -800,6 +902,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     </Text>
                                     <Text style={[styles.previewUploader, { color: mutedColor }]} numberOfLines={1}>
                                         {mediaInfo.uploader} · {mediaInfo.platform}
+                                        {mediaInfo.extractionSource && mediaInfo.extractionSource !== 'yt-dlp'
+                                            ? ' · Modo respaldo'
+                                            : ''}
                                     </Text>
                                 </View>
                             )}
@@ -1231,6 +1336,34 @@ const styles = StyleSheet.create({
     videoView: {
         width: '100%',
         height: '100%',
+    },
+    videoFallbackImg: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#11131C',
+    },
+    videoFallbackOverlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 10,
+        alignItems: 'center',
+    },
+    videoFallbackPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(0,0,0,0.78)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+    },
+    videoFallbackPillText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
     },
     muteFloatingBtn: {
         position: 'absolute',

@@ -16,6 +16,7 @@ import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
+import android.webkit.CookieManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.yausername.ffmpeg.FFmpeg
@@ -28,9 +29,26 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
 import java.util.Locale
 
-// Motor nativo de extracción y descarga basado en yt-dlp (github.com/yt-dlp/yt-dlp) + FFmpeg
+data class ExtractionStrategy(
+  val name: String,
+  val extractorArgs: String? = null,
+  val userAgent: String? = null,
+  val referer: String? = null,
+  val extraHeaders: Map<String, String> = emptyMap(),
+  val extraOptions: List<Pair<String, String?>> = emptyList(),
+  val overrideUrl: String? = null
+)
+
+data class PreviewStreamSelection(
+  val isAudioOnly: Boolean,
+  val streamUrl: String?,
+  val headers: Map<String, String>
+)
+
+// Motor nativo de extracción y descarga basado en yt-dlp (github.com/yt-dlp/yt-dlp) + FFmpeg + WebView oculto
 object SnowDownloaderEngine {
   private const val TAG = "SnowDownloaderEngine"
   private const val PREFS_NAME = "snow_beats_storage_prefs"
@@ -39,6 +57,10 @@ object SnowDownloaderEngine {
   private const val YTDLP_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L
   const val SAF_TREE_REQUEST_CODE = 5092
   const val LEGACY_STORAGE_REQUEST_CODE = 5091
+
+  private const val MOBILE_CHROME_UA = SnowHiddenWebViewExtractor.MOBILE_CHROME_UA
+  private const val DESKTOP_CHROME_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
   @Volatile
   private var initialized = false
@@ -62,13 +84,6 @@ object SnowDownloaderEngine {
     "x.com",
     "twitter.com",
     "t.co"
-  )
-
-  // Clientes de YouTube que funcionan sin inicio de sesión ni cookies en Android
-  private val youtubeClientStrategies = listOf(
-    "youtube:player_client=android,tv",
-    "youtube:player_client=tv,mweb",
-    null
   )
 
   fun ensureInitialized(context: Context) {
@@ -307,11 +322,80 @@ object SnowDownloaderEngine {
     }
   }
 
-  // Limpia parámetros de rastreo (?dmpr=, ?avpt=, ?igsh=) en URLs de Instagram para mejorar compatibilidad
-  private fun normalizeUrl(rawUrl: String): String {
+  // Extrae la URL real si el usuario pegó un redireccionamiento de Google Search (google.com/url?...&url=...)
+  private fun unwrapGoogleRedirect(rawUrl: String): String {
     val trimmed = rawUrl.trim()
     return try {
       val uri = Uri.parse(trimmed)
+      val host = (uri.host ?: "").lowercase(Locale.US)
+      if (host.contains("google.") && (uri.path ?: "").startsWith("/url")) {
+        val inner = uri.getQueryParameter("url") ?: uri.getQueryParameter("q")
+        if (!inner.isNullOrBlank()) {
+          val decoded = try { URLDecoder.decode(inner, "UTF-8") } catch (_: Exception) { inner }
+          if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
+            return decoded.trim()
+          }
+        }
+      }
+      trimmed
+    } catch (_: Exception) {
+      trimmed
+    }
+  }
+
+  // Resuelve enlaces cortos y compartidos (vm.tiktok.com, vt.tiktok.com, fb.watch, facebook.com/share/, t.co, instagr.am)
+  private fun resolveShortRedirect(url: String): String {
+    val lower = url.lowercase(Locale.US)
+    val shouldResolve = lower.contains("vm.tiktok.com") ||
+      lower.contains("vt.tiktok.com") ||
+      lower.contains("fb.watch") ||
+      lower.contains("facebook.com/share/") ||
+      lower.contains("fb.com/") ||
+      lower.contains("://t.co/") ||
+      lower.contains("instagr.am/")
+    if (!shouldResolve) return url
+
+    var current = url
+    repeat(5) {
+      var conn: HttpURLConnection? = null
+      try {
+        conn = (URL(current).openConnection() as HttpURLConnection).apply {
+          requestMethod = "GET"
+          instanceFollowRedirects = false
+          connectTimeout = 7000
+          readTimeout = 7000
+          setRequestProperty("User-Agent", MOBILE_CHROME_UA)
+          setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+        }
+        val code = conn.responseCode
+        if (code in 300..399) {
+          val location = conn.getHeaderField("Location")?.trim()
+          if (location.isNullOrBlank()) return current
+          current = if (location.startsWith("http://") || location.startsWith("https://")) {
+            location
+          } else {
+            URL(URL(current), location).toString()
+          }
+        } else {
+          return current
+        }
+      } catch (_: Exception) {
+        return current
+      } finally {
+        try { conn?.disconnect() } catch (_: Exception) { }
+      }
+    }
+    return current
+  }
+
+  // Limpia parámetros de rastreo (?dmpr=, ?avpt=, ?igsh=, ?gwpx=) y desenrolla redirecciones
+  private fun normalizeUrl(rawUrl: String, followShortLinks: Boolean = false): String {
+    var current = unwrapGoogleRedirect(rawUrl)
+    if (followShortLinks) {
+      current = resolveShortRedirect(current)
+    }
+    return try {
+      val uri = Uri.parse(current)
       val host = (uri.host ?: "").lowercase(Locale.US)
       if (host.contains("instagram.com")) {
         val path = (uri.path ?: "").trimEnd('/')
@@ -320,9 +404,140 @@ object SnowDownloaderEngine {
           return "https://www.instagram.com$normalizedPath/"
         }
       }
-      trimmed
+      if (host == "x.com" || host.endsWith(".x.com") || host.contains("twitter.com")) {
+        val path = (uri.path ?: "").trimEnd('/')
+        val statusMatch = Regex("^/([^/]+/status/\\d+)").find(path)
+        if (statusMatch != null) {
+          return "https://x.com/${statusMatch.groupValues[1]}"
+        }
+      }
+      current
     } catch (_: Exception) {
-      trimmed
+      current
+    }
+  }
+
+  // Construye la cascada de estrategias de cliente móvil spoofeado por plataforma (Paso 2)
+  private fun buildPlatformStrategies(platform: String?, canonicalUrl: String): List<ExtractionStrategy> {
+    return when (platform) {
+      "YouTube" -> listOf(
+        ExtractionStrategy(name = "yt_android_ios", extractorArgs = "youtube:player_client=android,ios"),
+        ExtractionStrategy(name = "yt_android_vr", extractorArgs = "youtube:player_client=android_vr"),
+        ExtractionStrategy(name = "yt_tv_mweb", extractorArgs = "youtube:player_client=tv,mweb"),
+        ExtractionStrategy(name = "yt_default")
+      )
+
+      "Instagram" -> {
+        val list = mutableListOf(
+          ExtractionStrategy(
+            name = "ig_mobile",
+            userAgent = MOBILE_CHROME_UA,
+            referer = "https://www.instagram.com/",
+            extraHeaders = mapOf("Accept-Language" to "es-ES,es;q=0.9,en;q=0.8")
+          )
+        )
+        val passiveCookies = try {
+          CookieManager.getInstance().getCookie("https://www.instagram.com")
+        } catch (_: Exception) {
+          null
+        }
+        if (!passiveCookies.isNullOrBlank()) {
+          list.add(
+            ExtractionStrategy(
+              name = "ig_mobile_webview_cookies",
+              userAgent = MOBILE_CHROME_UA,
+              referer = "https://www.instagram.com/",
+              extraHeaders = mapOf(
+                "Cookie" to passiveCookies,
+                "Accept-Language" to "es-ES,es;q=0.9,en;q=0.8"
+              )
+            )
+          )
+        }
+        list
+      }
+
+      "TikTok" -> listOf(
+        ExtractionStrategy(
+          name = "tt_mobile",
+          userAgent = MOBILE_CHROME_UA,
+          referer = "https://www.tiktok.com/"
+        ),
+        ExtractionStrategy(
+          name = "tt_api_host",
+          extractorArgs = "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com",
+          userAgent = MOBILE_CHROME_UA,
+          referer = "https://www.tiktok.com/"
+        ),
+        ExtractionStrategy(name = "tt_default")
+      )
+
+      "Facebook" -> listOf(
+        ExtractionStrategy(
+          name = "fb_mobile",
+          userAgent = MOBILE_CHROME_UA,
+          referer = "https://m.facebook.com/"
+        ),
+        ExtractionStrategy(
+          name = "fb_desktop_hd",
+          userAgent = DESKTOP_CHROME_UA,
+          referer = "https://www.facebook.com/"
+        )
+      )
+
+      "X" -> {
+        val twitterAltUrl = canonicalUrl.replace("://x.com/", "://twitter.com/")
+        listOf(
+          ExtractionStrategy(
+            name = "x_default",
+            userAgent = MOBILE_CHROME_UA,
+            referer = "https://x.com/"
+          ),
+          ExtractionStrategy(
+            name = "x_syndication",
+            extractorArgs = "twitter:api=syndication",
+            userAgent = MOBILE_CHROME_UA,
+            referer = "https://twitter.com/",
+            overrideUrl = twitterAltUrl
+          )
+        )
+      }
+
+      else -> listOf(ExtractionStrategy(name = "generic_default"))
+    }
+  }
+
+  private fun applyStrategyToRequest(request: YoutubeDLRequest, strategy: ExtractionStrategy) {
+    if (!strategy.extractorArgs.isNullOrBlank()) {
+      request.addOption("--extractor-args", strategy.extractorArgs)
+    }
+    if (!strategy.userAgent.isNullOrBlank()) {
+      request.addOption("--user-agent", strategy.userAgent)
+    }
+    if (!strategy.referer.isNullOrBlank()) {
+      request.addOption("--referer", strategy.referer)
+    }
+    strategy.extraHeaders.forEach { (k, v) ->
+      if (k.isNotBlank() && v.isNotBlank()) {
+        request.addOption("--add-header", "$k:$v")
+      }
+    }
+    strategy.extraOptions.forEach { (opt, value) ->
+      if (value == null) request.addOption(opt) else request.addOption(opt, value)
+    }
+  }
+
+  private fun applyCustomHeadersToRequest(request: YoutubeDLRequest, headers: Map<String, String>?) {
+    if (headers.isNullOrEmpty()) return
+    headers.forEach { (rawKey, rawVal) ->
+      val key = rawKey.trim()
+      val value = rawVal.trim()
+      if (key.isEmpty() || value.isEmpty()) return@forEach
+      when (key.lowercase(Locale.US)) {
+        "user-agent" -> request.addOption("--user-agent", value)
+        "referer" -> request.addOption("--referer", value)
+        else -> request.addOption("--add-header", "$key:$value")
+      }
     }
   }
 
@@ -338,6 +553,63 @@ object SnowDownloaderEngine {
       raw.contains("sabr")
   }
 
+  // Construye opciones estándar de descarga cuando la fuente entrega una URL directa (embed / WebView)
+  private fun buildDirectStreamAudioFormats(): List<Map<String, Any?>> = listOf(
+    mapOf(
+      "id" to "direct_audio_64",
+      "formatId" to "bestaudio/best",
+      "mediaType" to "audio",
+      "label" to "Rápido (64 kbps)",
+      "ext" to "mp3",
+      "qualityRank" to 64,
+      "audioQuality" to "64K",
+      "filesize" to 0L
+    ),
+    mapOf(
+      "id" to "direct_audio_128",
+      "formatId" to "bestaudio/best",
+      "mediaType" to "audio",
+      "label" to "MP3 clásico (128 kbps)",
+      "ext" to "mp3",
+      "qualityRank" to 128,
+      "audioQuality" to "128K",
+      "filesize" to 0L
+    ),
+    mapOf(
+      "id" to "direct_audio_192",
+      "formatId" to "bestaudio/best",
+      "mediaType" to "audio",
+      "label" to "Alta calidad (192 kbps)",
+      "ext" to "mp3",
+      "qualityRank" to 192,
+      "audioQuality" to "192K",
+      "filesize" to 0L
+    ),
+    mapOf(
+      "id" to "direct_audio_320",
+      "formatId" to "bestaudio/best",
+      "mediaType" to "audio",
+      "label" to "Máxima calidad (320 kbps)",
+      "ext" to "mp3",
+      "qualityRank" to 320,
+      "audioQuality" to "320K",
+      "filesize" to 0L
+    )
+  )
+
+  private fun buildDirectStreamVideoFormats(): List<Map<String, Any?>> = listOf(
+    mapOf(
+      "id" to "direct_video_original",
+      "formatId" to "best",
+      "mediaType" to "video",
+      "label" to "Calidad original (MP4)",
+      "ext" to "mp4",
+      "qualityRank" to 720,
+      "height" to 720,
+      "filesize" to 0L
+    )
+  )
+
   // Respaldo público para Reels/Posts de Instagram vía página embed cuando yt-dlp recibe bloqueo anónimo
   private fun tryInstagramPublicEmbedFallback(canonicalUrl: String): Map<String, Any?>? {
     val match = Regex("instagram\\.com/(reel|p|tv)/([A-Za-z0-9_-]+)").find(canonicalUrl) ?: return null
@@ -351,10 +623,7 @@ object SnowDownloaderEngine {
         connectTimeout = 10000
         readTimeout = 10000
         instanceFollowRedirects = true
-        setRequestProperty(
-          "User-Agent",
-          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-        )
+        setRequestProperty("User-Agent", MOBILE_CHROME_UA)
         setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         setRequestProperty("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
       }
@@ -384,54 +653,29 @@ object SnowDownloaderEngine {
         .find(html)?.groupValues?.getOrNull(1) ?: "Instagram"
 
       val title = "Instagram Reel · @$rawAuthor"
+      val embedHeaders = mapOf(
+        "User-Agent" to MOBILE_CHROME_UA,
+        "Referer" to "https://www.instagram.com/"
+      )
 
       mapOf(
         "ok" to true,
         "isPlaylist" to false,
         "isAudioOnly" to false,
+        "extractionSource" to "embed",
         "title" to title,
         "uploader" to "@$rawAuthor",
         "domain" to "instagram.com",
         "platform" to "Instagram",
         "thumbnail" to thumbUrl,
         "duration" to 0.0,
-        "url" to videoUrl,
+        "url" to canonicalUrl,
+        "directStreamUrl" to videoUrl,
         "previewStreamUrl" to videoUrl,
+        "previewHeaders" to embedHeaders,
         "entries" to emptyList<Map<String, Any?>>(),
-        "audioFormats" to listOf(
-          mapOf(
-            "id" to "ig_audio_128",
-            "formatId" to "bestaudio/best",
-            "mediaType" to "audio",
-            "label" to "MP3 clásico (128 kbps)",
-            "ext" to "mp3",
-            "qualityRank" to 128,
-            "audioQuality" to "128K",
-            "filesize" to 0L
-          ),
-          mapOf(
-            "id" to "ig_audio_192",
-            "formatId" to "bestaudio/best",
-            "mediaType" to "audio",
-            "label" to "Alta calidad (192 kbps)",
-            "ext" to "mp3",
-            "qualityRank" to 192,
-            "audioQuality" to "192K",
-            "filesize" to 0L
-          )
-        ),
-        "videoFormats" to listOf(
-          mapOf(
-            "id" to "ig_video_best",
-            "formatId" to "best",
-            "mediaType" to "video",
-            "label" to "Calidad original (MP4)",
-            "ext" to "mp4",
-            "qualityRank" to 720,
-            "height" to 720,
-            "filesize" to 0L
-          )
-        )
+        "audioFormats" to buildDirectStreamAudioFormats(),
+        "videoFormats" to buildDirectStreamVideoFormats()
       )
     } catch (e: Exception) {
       Log.w(TAG, "Respaldo embed de Instagram no disponible: ${e.message}")
@@ -448,10 +692,57 @@ object SnowDownloaderEngine {
       .replace("\\\\", "\\")
   }
 
+  // Respaldo de Paso 3 mediante WebView oculto nativo cuando las estrategias yt-dlp/embed son bloqueadas
+  private fun tryHiddenWebViewFallback(
+    context: Context,
+    canonicalUrl: String,
+    platform: String
+  ): Map<String, Any?>? {
+    val wv = SnowHiddenWebViewExtractor.extract(
+      context = context,
+      pageUrl = canonicalUrl,
+      platform = platform,
+      timeoutMs = 14_000L
+    )
+    val streamUrl = wv.streamUrl
+    if (streamUrl.isNullOrBlank()) {
+      if (wv.requiresLogin) {
+        return mapOf(
+          "ok" to false,
+          "errorCode" to "PRIVATE_CONTENT",
+          "errorMessage" to "$platform restringe esta publicación (es privada o requiere inicio de sesión en la cuenta)."
+        )
+      }
+      return null
+    }
+
+    val hostDomain = try { Uri.parse(canonicalUrl).host ?: platform } catch (_: Exception) { platform }
+    val cleanTitle = wv.title?.takeIf { it.isNotBlank() } ?: "Video de $platform"
+    return mapOf(
+      "ok" to true,
+      "isPlaylist" to false,
+      "isAudioOnly" to false,
+      "extractionSource" to "webview",
+      "title" to cleanTitle,
+      "uploader" to platform,
+      "domain" to hostDomain,
+      "platform" to platform,
+      "thumbnail" to wv.thumbnail,
+      "duration" to 0.0,
+      "url" to canonicalUrl,
+      "directStreamUrl" to streamUrl,
+      "previewStreamUrl" to streamUrl,
+      "previewHeaders" to wv.headers,
+      "entries" to emptyList<Map<String, Any?>>(),
+      "audioFormats" to buildDirectStreamAudioFormats(),
+      "videoFormats" to buildDirectStreamVideoFormats()
+    )
+  }
+
   // Extrae metadatos, formatos disponibles (audio/video ordenados de menor a mayor) o elementos de playlist
   fun extractMediaInfo(context: Context, rawUrl: String): Map<String, Any?> {
-    val url = normalizeUrl(rawUrl)
-    if (!isAllowedUrl(url)) {
+    val unwrapped = unwrapGoogleRedirect(rawUrl)
+    if (!isAllowedUrl(unwrapped)) {
       return mapOf(
         "ok" to false,
         "errorCode" to "UNSUPPORTED_URL",
@@ -467,34 +758,29 @@ object SnowDownloaderEngine {
       )
     }
 
-    val detectedPlatform = detectPlatform(url)
+    val url = normalizeUrl(unwrapped, followShortLinks = true)
+    val detectedPlatform = detectPlatform(url) ?: detectPlatform(unwrapped)
 
     return try {
       ensureInitialized(context)
 
-      val strategies: List<String?> = if (detectedPlatform == "YouTube") {
-        youtubeClientStrategies
-      } else {
-        listOf(null)
-      }
-
+      val strategies = buildPlatformStrategies(detectedPlatform, url)
       var rawOut = ""
       var lastException: Exception? = null
       var didForceUpdate = false
 
       var idx = 0
       while (idx < strategies.size) {
-        val extractorArg = strategies[idx]
+        val strategy = strategies[idx]
+        val attemptUrl = strategy.overrideUrl ?: url
         try {
-          val request = YoutubeDLRequest(url).apply {
+          val request = YoutubeDLRequest(attemptUrl).apply {
             addOption("--dump-single-json")
             addOption("--no-warnings")
             addOption("--flat-playlist")
             addOption("--no-check-certificates")
             addOption("--geo-bypass")
-            if (extractorArg != null) {
-              addOption("--extractor-args", extractorArg)
-            }
+            applyStrategyToRequest(this, strategy)
           }
           val response = YoutubeDL.getInstance().execute(request, "extract_${System.currentTimeMillis()}")
           val out = response.out?.trim() ?: ""
@@ -505,7 +791,7 @@ object SnowDownloaderEngine {
           }
         } catch (e: Exception) {
           lastException = e
-          Log.w(TAG, "extractMediaInfo fallo (platform=$detectedPlatform, arg=$extractorArg): ${buildCauseChain(e)}")
+          Log.w(TAG, "extractMediaInfo fallo (platform=$detectedPlatform, strategy=${strategy.name}): ${buildCauseChain(e)}")
           // Si falla por bloqueo/403 y aún no actualizamos yt-dlp en esta sesión, actualiza y reintenta
           if (!didForceUpdate && isRetryableExtractorError(e)) {
             didForceUpdate = true
@@ -518,10 +804,16 @@ object SnowDownloaderEngine {
       }
 
       if (rawOut.isBlank()) {
-        // Para Instagram público intenta respaldo embed antes de rendirse
+        // Paso 2.3: Para Instagram público intenta respaldo /embed/captioned/
         if (detectedPlatform == "Instagram") {
           val igFallback = tryInstagramPublicEmbedFallback(url)
           if (igFallback != null) return igFallback
+        }
+
+        // Paso 3: WebView oculto nativo (Instagram, TikTok, Facebook y X)
+        if (detectedPlatform != null && detectedPlatform != "YouTube") {
+          val webViewResult = tryHiddenWebViewFallback(context, url, detectedPlatform)
+          if (webViewResult != null) return webViewResult
         }
 
         if (lastException != null) {
@@ -573,7 +865,6 @@ object SnowDownloaderEngine {
           )
         }
 
-        // Formatos estándar para descarga masiva de playlist (ordenados de menor a mayor calidad)
         val defaultAudioFormats = buildStandardPlaylistAudioFormats()
         val defaultVideoFormats = buildStandardPlaylistVideoFormats()
 
@@ -581,6 +872,7 @@ object SnowDownloaderEngine {
           "ok" to true,
           "isPlaylist" to true,
           "isAudioOnly" to false,
+          "extractionSource" to "yt-dlp",
           "title" to root.optString("title", "Lista de reproducción"),
           "uploader" to root.optString("uploader", platform),
           "domain" to hostDomain,
@@ -588,21 +880,24 @@ object SnowDownloaderEngine {
           "thumbnail" to (extractBestThumbnail(root) ?: items.firstOrNull()?.get("thumbnail")),
           "duration" to 0.0,
           "url" to url,
+          "directStreamUrl" to null,
           "previewStreamUrl" to null,
+          "previewHeaders" to emptyMap<String, String>(),
           "entries" to items,
           "audioFormats" to defaultAudioFormats,
           "videoFormats" to defaultVideoFormats
         )
       }
 
-      // Caso 2: Recurso individual (video o audio)
+      // Caso 2: Recurso individual (video o audio) con propagación de headers HTTP para evitar 403 en vista previa
       val parsedFormats = parseFormats(root)
       val previewInfo = pickPreviewStream(root)
 
       mapOf(
         "ok" to true,
         "isPlaylist" to false,
-        "isAudioOnly" to previewInfo.first,
+        "isAudioOnly" to previewInfo.isAudioOnly,
+        "extractionSource" to "yt-dlp",
         "title" to root.optString("title", "Sin título"),
         "uploader" to root.optString("uploader", root.optString("channel", platform)),
         "domain" to hostDomain,
@@ -610,7 +905,9 @@ object SnowDownloaderEngine {
         "thumbnail" to extractBestThumbnail(root),
         "duration" to (root.optDouble("duration", 0.0).takeIf { !it.isNaN() } ?: 0.0),
         "url" to root.optString("webpage_url", url),
-        "previewStreamUrl" to previewInfo.second,
+        "directStreamUrl" to if (platform != "YouTube") previewInfo.streamUrl else null,
+        "previewStreamUrl" to previewInfo.streamUrl,
+        "previewHeaders" to previewInfo.headers,
         "entries" to emptyList<Map<String, Any?>>(),
         "audioFormats" to parsedFormats.first,
         "videoFormats" to parsedFormats.second
@@ -637,20 +934,38 @@ object SnowDownloaderEngine {
     return null
   }
 
-  // Selecciona una URL de streaming directa compatible con exo-video / exo-audio
-  private fun pickPreviewStream(root: JSONObject): Pair<Boolean, String?> {
+  private fun parseHttpHeadersJson(obj: JSONObject?): Map<String, String> {
+    if (obj == null) return emptyMap()
+    val out = LinkedHashMap<String, String>()
+    val keys = obj.keys()
+    while (keys.hasNext()) {
+      val k = keys.next()
+      val v = obj.optString(k, "").trim()
+      if (k.isNotBlank() && v.isNotBlank()) {
+        out[k] = v
+      }
+    }
+    return out
+  }
+
+  // Selecciona una URL de streaming directa + sus headers HTTP reales para exo-video / exo-audio
+  private fun pickPreviewStream(root: JSONObject): PreviewStreamSelection {
+    val rootHeaders = parseHttpHeadersJson(root.optJSONObject("http_headers"))
     val formats = root.optJSONArray("formats")
     if (formats == null || formats.length() == 0) {
       val direct = root.optString("url").takeIf { it.startsWith("http") }
       val vcodec = root.optString("vcodec", "none")
       val isAudioOnly = vcodec == "none"
-      return Pair(isAudioOnly, direct)
+      return PreviewStreamSelection(isAudioOnly, direct, rootHeaders)
     }
 
     var bestProgressiveVideo: String? = null
+    var bestProgressiveHeaders: Map<String, String> = rootHeaders
     var bestProgressiveHeight = 0
     var bestAnyVideo: String? = null
+    var bestAnyVideoHeaders: Map<String, String> = rootHeaders
     var bestAudioOnly: String? = null
+    var bestAudioHeaders: Map<String, String> = rootHeaders
     var bestAudioAbr = 0.0
 
     for (i in 0 until formats.length()) {
@@ -665,29 +980,39 @@ object SnowDownloaderEngine {
       val ext = f.optString("ext", "")
       val height = f.optInt("height", 0)
       val abr = f.optDouble("abr", 0.0).takeIf { !it.isNaN() } ?: 0.0
+      val fmtHeaders = parseHttpHeadersJson(f.optJSONObject("http_headers")).ifEmpty { rootHeaders }
 
       if (vcodec != "none" && acodec != "none") {
         // Prioriza MP4 progresivo hasta 720p para carga rápida de vista previa
         if (ext == "mp4" && height in 240..720 && height >= bestProgressiveHeight) {
           bestProgressiveHeight = height
           bestProgressiveVideo = u
+          bestProgressiveHeaders = fmtHeaders
         } else if (bestAnyVideo == null) {
           bestAnyVideo = u
+          bestAnyVideoHeaders = fmtHeaders
         }
       } else if (vcodec == "none" && acodec != "none") {
         if (abr >= bestAudioAbr) {
           bestAudioAbr = abr
           bestAudioOnly = u
+          bestAudioHeaders = fmtHeaders
         }
       }
     }
 
-    val chosenVideo = bestProgressiveVideo ?: bestAnyVideo
-    if (chosenVideo != null) return Pair(false, chosenVideo)
-    if (bestAudioOnly != null) return Pair(true, bestAudioOnly)
+    if (bestProgressiveVideo != null) {
+      return PreviewStreamSelection(false, bestProgressiveVideo, bestProgressiveHeaders)
+    }
+    if (bestAnyVideo != null) {
+      return PreviewStreamSelection(false, bestAnyVideo, bestAnyVideoHeaders)
+    }
+    if (bestAudioOnly != null) {
+      return PreviewStreamSelection(true, bestAudioOnly, bestAudioHeaders)
+    }
 
     val fallback = root.optString("url").takeIf { it.startsWith("http") }
-    return Pair(false, fallback)
+    return PreviewStreamSelection(false, fallback, rootHeaders)
   }
 
   // Extrae todos los formatos soportados y los ordena estrictamente de MENOR a MAYOR calidad
@@ -871,7 +1196,7 @@ object SnowDownloaderEngine {
     )
   )
 
-  // Ejecuta una descarga real mediante yt-dlp en caché temporal y exporta al destino (Directo, SAF o MediaStore)
+  // Ejecuta una descarga real mediante yt-dlp (con cascada por plataforma, headers, respaldo directo HTTP y FFmpeg local)
   fun downloadMedia(
     context: Context,
     taskId: String,
@@ -880,10 +1205,12 @@ object SnowDownloaderEngine {
     mediaType: String,
     audioQuality: String?,
     targetDisplayPath: String,
+    headers: Map<String, String>? = null,
+    directStreamUrl: String? = null,
     onProgress: (Float, Long, String) -> Unit
   ): Map<String, Any?> {
-    val url = normalizeUrl(rawUrl)
-    val detectedPlatform = detectPlatform(url)
+    val url = normalizeUrl(rawUrl, followShortLinks = true)
+    val detectedPlatform = detectPlatform(url) ?: detectPlatform(rawUrl)
 
     if (!hasStorageWritePermission(context)) {
       return mapOf(
@@ -920,94 +1247,166 @@ object SnowDownloaderEngine {
     return try {
       ensureInitialized(context)
 
-      val strategies: List<String?> = if (detectedPlatform == "YouTube") {
-        youtubeClientStrategies
-      } else {
-        listOf(null)
-      }
-
       var lastError: Exception? = null
       var didForceUpdate = false
       var succeeded = false
 
-      var idx = 0
-      while (idx < strategies.size) {
-        val extractorArg = strategies[idx]
-        // Limpia archivos parciales de un intento fallido previo
-        tempDir.listFiles()?.forEach { it.deleteRecursively() }
-
+      // Si tenemos una directStreamUrl capturada (WebView/embed), la intentamos primero con yt-dlp (maneja HLS y FFmpeg MP3)
+      val hasDirectStream = !directStreamUrl.isNullOrBlank() && directStreamUrl.startsWith("http")
+      if (hasDirectStream && (detectedPlatform == "Instagram" || detectedPlatform == "TikTok" || detectedPlatform == "Facebook" || detectedPlatform == "X")) {
         try {
-          val request = YoutubeDLRequest(url).apply {
-            addOption("--no-playlist")
-            addOption("--no-warnings")
-            addOption("--no-check-certificates")
-            addOption("--geo-bypass")
-            addOption("--retries", "3")
-            addOption("--fragment-retries", "3")
-            addOption("--newline")
-            addOption("--restrict-filenames")
-            if (extractorArg != null) {
-              addOption("--extractor-args", extractorArg)
-            }
-            addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
-
-            if (mediaType == "audio") {
-              addOption("-f", formatId.ifBlank { "bestaudio[ext=m4a]/bestaudio/best" })
-              addOption("-x")
-              addOption("--audio-format", "mp3")
-              addOption("--audio-quality", audioQuality ?: "128K")
-              addOption("--embed-thumbnail")
-              addOption("--add-metadata")
-            } else {
-              addOption("-f", formatId.ifBlank { "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" })
-              addOption("--merge-output-format", "mp4")
-            }
-          }
-
-          YoutubeDL.getInstance().execute(request, taskId) { progress, etaInSeconds, line ->
-            onProgress(progress, etaInSeconds, line)
-          }
-          succeeded = true
-          lastError = null
-          break
+          tempDir.listFiles()?.forEach { it.deleteRecursively() }
+          runYtDlpDownloadRequest(
+            targetUrl = directStreamUrl!!,
+            tempDir = tempDir,
+            taskId = taskId,
+            formatId = if (mediaType == "audio") "bestaudio/best" else "best",
+            mediaType = mediaType,
+            audioQuality = audioQuality,
+            strategy = null,
+            customHeaders = headers,
+            onProgress = onProgress
+          )
+          succeeded = findDownloadedTempFile(tempDir) != null
         } catch (e: Exception) {
           lastError = e
           val rawErr = buildCauseChain(e).lowercase(Locale.US)
-          Log.w(TAG, "downloadMedia fallo (platform=$detectedPlatform, arg=$extractorArg): $rawErr")
           if (rawErr.contains("canceled") || rawErr.contains("cancelled") || rawErr.contains("destroyed")) {
             throw e
           }
-          if (!didForceUpdate && isRetryableExtractorError(e)) {
-            didForceUpdate = true
-            if (maybeUpdateYtDlp(context, force = true)) {
-              continue
+          Log.w(TAG, "yt-dlp sobre directStreamUrl falló, intentando estrategias de plataforma: $rawErr")
+        }
+      }
+
+      // Cascada de estrategias por plataforma en yt-dlp
+      if (!succeeded) {
+        val strategies = buildPlatformStrategies(detectedPlatform, url)
+        var idx = 0
+        while (idx < strategies.size) {
+          val strategy = strategies[idx]
+          val attemptUrl = strategy.overrideUrl ?: url
+          tempDir.listFiles()?.forEach { it.deleteRecursively() }
+
+          try {
+            runYtDlpDownloadRequest(
+              targetUrl = attemptUrl,
+              tempDir = tempDir,
+              taskId = taskId,
+              formatId = formatId,
+              mediaType = mediaType,
+              audioQuality = audioQuality,
+              strategy = strategy,
+              customHeaders = headers,
+              onProgress = onProgress
+            )
+            succeeded = true
+            lastError = null
+            break
+          } catch (e: Exception) {
+            lastError = e
+            val rawErr = buildCauseChain(e).lowercase(Locale.US)
+            Log.w(TAG, "downloadMedia fallo (platform=$detectedPlatform, strategy=${strategy.name}): $rawErr")
+            if (rawErr.contains("canceled") || rawErr.contains("cancelled") || rawErr.contains("destroyed")) {
+              throw e
+            }
+
+            // Si falló únicamente por selector de calidad rígido, reintenta con 'best' + transcodificación local FFmpeg
+            if (rawErr.contains("requested format is not available")) {
+              try {
+                tempDir.listFiles()?.forEach { it.deleteRecursively() }
+                runYtDlpDownloadRequest(
+                  targetUrl = attemptUrl,
+                  tempDir = tempDir,
+                  taskId = taskId,
+                  formatId = if (mediaType == "audio") "bestaudio/best" else "best",
+                  mediaType = mediaType,
+                  audioQuality = audioQuality,
+                  strategy = strategy,
+                  customHeaders = headers,
+                  onProgress = onProgress
+                )
+                succeeded = true
+                lastError = null
+                break
+              } catch (fallbackFmtErr: Exception) {
+                lastError = fallbackFmtErr
+              }
+            }
+
+            if (!didForceUpdate && isRetryableExtractorError(e)) {
+              didForceUpdate = true
+              if (maybeUpdateYtDlp(context, force = true)) {
+                continue
+              }
+            }
+          }
+          idx++
+        }
+      }
+
+      // Último respaldo (Paso 3): descarga directa HTTP de MP4 + conversión local a MP3 con FFmpeg si aplica
+      if (!succeeded) {
+        var fallbackStreamUrl = directStreamUrl?.takeIf { it.startsWith("http") }
+        var fallbackHeaders = headers ?: emptyMap()
+
+        // Si no teníamos stream directo aún y es red social, intenta capturarlo con el WebView oculto
+        if (fallbackStreamUrl == null && detectedPlatform != null && detectedPlatform != "YouTube") {
+          val wv = SnowHiddenWebViewExtractor.extract(context, url, detectedPlatform, 14_000L)
+          if (!wv.streamUrl.isNullOrBlank()) {
+            fallbackStreamUrl = wv.streamUrl
+            fallbackHeaders = wv.headers
+          }
+        }
+
+        if (fallbackStreamUrl != null) {
+          val lowerStream = fallbackStreamUrl.lowercase(Locale.US)
+          val isManifest = lowerStream.contains(".m3u8") || lowerStream.contains(".mpd")
+          tempDir.listFiles()?.forEach { it.deleteRecursively() }
+
+          if (isManifest) {
+            try {
+              runYtDlpDownloadRequest(
+                targetUrl = fallbackStreamUrl,
+                tempDir = tempDir,
+                taskId = taskId,
+                formatId = if (mediaType == "audio") "bestaudio/best" else "best",
+                mediaType = mediaType,
+                audioQuality = audioQuality,
+                strategy = null,
+                customHeaders = fallbackHeaders,
+                onProgress = onProgress
+              )
+              succeeded = findDownloadedTempFile(tempDir) != null
+            } catch (e: Exception) {
+              lastError = e
+            }
+          } else {
+            val directFile = downloadDirectStreamViaHttp(
+              streamUrl = fallbackStreamUrl,
+              headers = fallbackHeaders,
+              tempDir = tempDir,
+              baseName = "snow_beats_${System.currentTimeMillis()}",
+              onProgress = onProgress
+            )
+            if (directFile != null && directFile.exists() && directFile.length() > 0L) {
+              if (mediaType == "audio") {
+                convertLocalMediaToMp3(directFile, tempDir, taskId, audioQuality ?: "128K")
+              }
+              succeeded = findDownloadedTempFile(tempDir) != null
             }
           }
         }
-        idx++
       }
 
       if (!succeeded && lastError != null) {
         throw lastError
       }
 
-      val downloadedFile = tempDir.listFiles()
-        ?.filter { f ->
-          f.isFile &&
-            !f.name.endsWith(".part") &&
-            !f.name.endsWith(".ytdl") &&
-            !f.name.endsWith(".temp") &&
-            !f.name.endsWith(".jpg") &&
-            !f.name.endsWith(".jpeg") &&
-            !f.name.endsWith(".webp") &&
-            !f.name.endsWith(".png")
-        }
-        ?.sortedByDescending { it.length() }
-        ?.firstOrNull()
+      val downloadedFile = findDownloadedTempFile(tempDir)
         ?: return mapOf(
           "ok" to false,
           "errorCode" to "EMPTY_OUTPUT",
-          "errorMessage" to "yt-dlp finalizó pero no generó el archivo de salida."
+          "errorMessage" to "No se generó el archivo de salida tras la descarga."
         )
 
       val exported = exportDownloadedFile(
@@ -1042,6 +1441,157 @@ object SnowDownloaderEngine {
         tempDir.deleteRecursively()
       } catch (_: Exception) { }
     }
+  }
+
+  private fun runYtDlpDownloadRequest(
+    targetUrl: String,
+    tempDir: File,
+    taskId: String,
+    formatId: String,
+    mediaType: String,
+    audioQuality: String?,
+    strategy: ExtractionStrategy?,
+    customHeaders: Map<String, String>?,
+    onProgress: (Float, Long, String) -> Unit
+  ) {
+    val request = YoutubeDLRequest(targetUrl).apply {
+      addOption("--no-playlist")
+      addOption("--no-warnings")
+      addOption("--no-check-certificates")
+      addOption("--geo-bypass")
+      addOption("--retries", "3")
+      addOption("--fragment-retries", "3")
+      addOption("--newline")
+      addOption("--restrict-filenames")
+      if (strategy != null) {
+        applyStrategyToRequest(this, strategy)
+      } else {
+        applyCustomHeadersToRequest(this, customHeaders)
+      }
+      addOption("-o", File(tempDir, "%(title).110B.%(ext)s").absolutePath)
+
+      if (mediaType == "audio") {
+        addOption("-f", formatId.ifBlank { "bestaudio[ext=m4a]/bestaudio/best" })
+        addOption("-x")
+        addOption("--audio-format", "mp3")
+        addOption("--audio-quality", audioQuality ?: "128K")
+        addOption("--embed-thumbnail")
+        addOption("--add-metadata")
+      } else {
+        addOption("-f", formatId.ifBlank { "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" })
+        addOption("--merge-output-format", "mp4")
+      }
+    }
+
+    YoutubeDL.getInstance().execute(request, taskId) { progress, etaInSeconds, line ->
+      onProgress(progress, etaInSeconds, line)
+    }
+  }
+
+  // Descarga progresiva directa con HttpURLConnection reportando progreso en vivo
+  private fun downloadDirectStreamViaHttp(
+    streamUrl: String,
+    headers: Map<String, String>,
+    tempDir: File,
+    baseName: String,
+    onProgress: (Float, Long, String) -> Unit
+  ): File? {
+    var conn: HttpURLConnection? = null
+    return try {
+      conn = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        instanceFollowRedirects = true
+        connectTimeout = 15000
+        readTimeout = 25000
+        setRequestProperty("User-Agent", headers["User-Agent"] ?: MOBILE_CHROME_UA)
+        headers.forEach { (k, v) ->
+          if (!k.equals("User-Agent", ignoreCase = true) && v.isNotBlank()) {
+            setRequestProperty(k, v)
+          }
+        }
+      }
+      if (conn.responseCode !in 200..299) {
+        Log.w(TAG, "Descarga directa HTTP devolvió código ${conn.responseCode}")
+        return null
+      }
+      val totalBytes = conn.contentLengthLong
+      val outFile = File(tempDir, "$baseName.mp4")
+      val startTime = System.currentTimeMillis()
+      var downloaded = 0L
+
+      conn.inputStream.use { input ->
+        FileOutputStream(outFile).use { output ->
+          val buffer = ByteArray(16 * 1024)
+          var read: Int
+          while (input.read(buffer).also { read = it } != -1) {
+            output.write(buffer, 0, read)
+            downloaded += read
+            val pct = if (totalBytes > 0L) {
+              ((downloaded.toDouble() / totalBytes.toDouble()) * 100.0).toFloat().coerceIn(0f, 99f)
+            } else {
+              50f
+            }
+            val elapsedSec = ((System.currentTimeMillis() - startTime) / 1000.0).coerceAtLeast(0.5)
+            val speed = downloaded / elapsedSec
+            val eta = if (totalBytes > 0L && speed > 1.0) {
+              ((totalBytes - downloaded) / speed).toLong().coerceAtLeast(0L)
+            } else 0L
+            onProgress(pct, eta, "Descargando flujo directo...")
+          }
+        }
+      }
+      onProgress(100f, 0L, "Descarga completada")
+      outFile
+    } catch (e: Exception) {
+      Log.w(TAG, "Error en descarga directa HTTP: ${e.message}")
+      null
+    } finally {
+      try { conn?.disconnect() } catch (_: Exception) { }
+    }
+  }
+
+  // Convierte un MP4 local recién descargado a MP3 aprovechando FFmpeg gestionado por yt-dlp
+  private fun convertLocalMediaToMp3(
+    sourceVideo: File,
+    tempDir: File,
+    taskId: String,
+    audioQuality: String
+  ) {
+    try {
+      val mp3Out = File(tempDir, "${sourceVideo.nameWithoutExtension}.%(ext)s")
+      val req = YoutubeDLRequest("file://${sourceVideo.absolutePath}").apply {
+        addOption("--enable-file-urls")
+        addOption("--no-warnings")
+        addOption("-x")
+        addOption("--audio-format", "mp3")
+        addOption("--audio-quality", audioQuality)
+        addOption("-o", mp3Out.absolutePath)
+      }
+      YoutubeDL.getInstance().execute(req, "${taskId}_mp3")
+      val producedMp3 = tempDir.listFiles()?.firstOrNull { it.isFile && it.extension.equals("mp3", ignoreCase = true) }
+      if (producedMp3 != null && producedMp3.length() > 0L) {
+        sourceVideo.delete()
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "No se pudo convertir archivo local a MP3 con FFmpeg: ${e.message}")
+    }
+  }
+
+  private fun findDownloadedTempFile(tempDir: File): File? {
+    return tempDir.listFiles()
+      ?.filter { f ->
+        f.isFile &&
+          f.length() > 0L &&
+          !f.name.endsWith(".part") &&
+          !f.name.endsWith(".ytdl") &&
+          !f.name.endsWith(".temp") &&
+          !f.name.endsWith(".jpg") &&
+          !f.name.endsWith(".jpeg") &&
+          !f.name.endsWith(".webp") &&
+          !f.name.endsWith(".png")
+      }
+      ?.sortedByDescending { it.length() }
+      ?.firstOrNull()
   }
 
   private fun mimeTypeForFile(fileName: String, mediaType: String): String {
