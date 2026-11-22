@@ -112,6 +112,19 @@ export interface DownloadProgressEvent {
     line?: string;
 }
 
+export interface PersistedCoverResult {
+    artworkUri: string;
+    dominantColor: string | null;
+}
+
+export interface PickedLyricsFileResult {
+    ok: boolean;
+    cancelled?: boolean;
+    fileName?: string;
+    content?: string;
+    errorMessage?: string;
+}
+
 interface SnowMetadataNativeModule {
     readTrackTags(uri: string, trackId: string): Promise<NativeTrackTags | null>;
     readTrackLyrics?: (uri: string) => Promise<string | null>;
@@ -130,6 +143,8 @@ interface SnowMetadataNativeModule {
     extractMediaInfo?: (url: string) => Promise<ExtractedMediaInfo>;
     downloadMedia?: (options: DownloadMediaOptions) => Promise<DownloadMediaResult>;
     cancelDownload?: (taskId: string) => Promise<boolean>;
+    persistCoverImage?: (sourceUri: string, trackId: string) => Promise<PersistedCoverResult | null>;
+    pickLyricsFile?: () => Promise<PickedLyricsFileResult>;
     addListener?: (eventName: string, listener: (event: any) => void) => EventSubscription;
 }
 
@@ -273,4 +288,26 @@ export function addDownloadProgressListener(
         return null;
     }
     return SnowMetadata.addListener('onDownloadProgress', listener);
+}
+
+// Copia la carátula 1:1 recortada al almacenamiento persistente de la app y calcula color dominante
+export async function persistCoverImage(
+    sourceUri: string,
+    trackId: string
+): Promise<PersistedCoverResult | null> {
+    if (!SnowMetadata || typeof SnowMetadata.persistCoverImage !== 'function') {
+        return { artworkUri: sourceUri, dominantColor: null };
+    }
+    return SnowMetadata.persistCoverImage(sourceUri, trackId);
+}
+
+// Abre el selector nativo de documentos Android para importar letras (.lrc / .txt)
+export async function pickLyricsFile(): Promise<PickedLyricsFileResult> {
+    if (!SnowMetadata || typeof SnowMetadata.pickLyricsFile !== 'function') {
+        return {
+            ok: false,
+            errorMessage: 'La importación nativa de archivos .lrc/.txt requiere compilar la app Android.',
+        };
+    }
+    return SnowMetadata.pickLyricsFile();
 }

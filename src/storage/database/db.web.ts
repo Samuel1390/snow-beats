@@ -15,7 +15,7 @@ export interface FolderItem {
 }
 
 interface WebDbState {
-  tracks: (Track & { lyricsText?: string; lastPlayedAt?: number })[];
+  tracks: (Track & { lyricsText?: string; lastPlayedAt?: number; isCustomEdited?: boolean })[];
   searchHistory: { query: string; searchedAt: number }[];
   playlists: { id: string; name: string; createdAt: number }[];
   playlistTracks: { playlistId: string; trackId: string; position: number }[];
@@ -103,14 +103,45 @@ export async function updateTrackMetadata(
     t.id === trackId
       ? {
           ...t,
-          title: metadata.title ?? t.title,
-          artist: metadata.artist ?? t.artist,
+          title: t.isCustomEdited ? t.title : (metadata.title ?? t.title),
+          artist: t.isCustomEdited ? t.artist : (metadata.artist ?? t.artist),
           album: metadata.album ?? t.album,
-          artworkUri: metadata.artworkUri ?? null,
-          dominantColor: metadata.dominantColor ?? null,
+          artworkUri: t.isCustomEdited ? t.artworkUri : (metadata.artworkUri ?? null),
+          dominantColor: t.isCustomEdited ? t.dominantColor : (metadata.dominantColor ?? null),
         }
       : t
   );
+  saveState(state);
+}
+
+export async function saveEditedTrackData(
+  trackId: string,
+  data: {
+    title: string;
+    artist: string;
+    artworkUri: string | null;
+    dominantColor: string | null;
+    lyricsText?: string | null;
+  }
+): Promise<void> {
+  const state = loadState();
+  const cleanTitle = data.title.trim() || 'Sin título';
+  const cleanArtist = data.artist.trim() || 'Artista desconocido';
+  state.tracks = state.tracks.map((t) => {
+    if (t.id !== trackId) return t;
+    const nextLyrics = data.lyricsText !== undefined ? (data.lyricsText?.trim() ?? '') : t.lyricsText;
+    return {
+      ...t,
+      title: cleanTitle,
+      artist: cleanArtist,
+      artworkUri: data.artworkUri,
+      dominantColor: data.dominantColor,
+      isCustomEdited: true,
+      ...(data.lyricsText !== undefined
+        ? { lyricsText: nextLyrics, hasLyrics: Boolean(nextLyrics && nextLyrics.length > 0) }
+        : {}),
+    };
+  });
   saveState(state);
 }
 

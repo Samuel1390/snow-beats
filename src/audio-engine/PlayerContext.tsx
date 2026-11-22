@@ -48,6 +48,7 @@ interface PlayerContextValue {
     hideCurrentTrack: () => Promise<void>;
     deleteCurrentTrack: () => Promise<void>;
     addToQueue: (tracks: Track[]) => void;
+    updateCurrentTrack: (patch: Partial<Track>) => void;
 }
 
 interface ProgressValue {
@@ -329,6 +330,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await toggleTrackFavorite(curr.id, next);
     }, [syncNotification]);
 
+    // Actualiza en vivo los datos editados de la canción actual (cola, estado y notificación)
+    const updateCurrentTrack = useCallback(
+        (patch: Partial<Track>) => {
+            const curr = currentTrackRef.current;
+            if (!curr) return;
+            const updated: Track = { ...curr, ...patch };
+            currentTrackRef.current = updated;
+            setCurrentTrack(updated);
+            queueRef.current = queueRef.current.map((item) =>
+                item.id === updated.id ? { ...item, ...patch } : item
+            );
+            syncNotification(updated, Boolean(playerRef.current?.playing));
+        },
+        [syncNotification]
+    );
+
     // Escucha los botones del control multimedia flotante de la barra de notificaciones
     useEffect(() => {
         if (Platform.OS !== 'android') return;
@@ -407,6 +424,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             hideCurrentTrack,
             deleteCurrentTrack,
             addToQueue,
+            updateCurrentTrack,
         }),
         [
             currentTrack,
@@ -427,6 +445,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             hideCurrentTrack,
             deleteCurrentTrack,
             addToQueue,
+            updateCurrentTrack,
         ]
     );
 

@@ -79,6 +79,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN lyrics_text TEXT DEFAULT ''`); } catch { }
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN last_played_at INTEGER DEFAULT 0`); } catch { }
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN dominant_color TEXT`); } catch { }
+  try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN is_custom_edited INTEGER DEFAULT 0`); } catch { }
 
   dbInstance = db;
   return db;
@@ -105,7 +106,7 @@ function mapRowToTrack(row: any): Track {
   };
 }
 
-// Actualiza etiquetas ID3, carátula y color dominante de una pista
+// Actualiza etiquetas ID3, carátula y color dominante de una pista (respeta ediciones manuales del usuario)
 export async function updateTrackMetadata(
   trackId: string,
   metadata: Partial<Pick<Track, 'title' | 'artist' | 'album' | 'artworkUri' | 'dominantColor'>>
@@ -113,11 +114,11 @@ export async function updateTrackMetadata(
   const db = await getDatabase();
   await db.runAsync(
     `UPDATE tracks
-     SET title = COALESCE(?, title),
-         artist = COALESCE(?, artist),
+     SET title = CASE WHEN COALESCE(is_custom_edited, 0) = 1 THEN title ELSE COALESCE(?, title) END,
+         artist = CASE WHEN COALESCE(is_custom_edited, 0) = 1 THEN artist ELSE COALESCE(?, artist) END,
          album = COALESCE(?, album),
-         artwork_uri = ?,
-         dominant_color = ?
+         artwork_uri = CASE WHEN COALESCE(is_custom_edited, 0) = 1 THEN artwork_uri ELSE ? END,
+         dominant_color = CASE WHEN COALESCE(is_custom_edited, 0) = 1 THEN dominant_color ELSE ? END
      WHERE id = ?`,
     [
       metadata.title ?? null,
@@ -128,6 +129,57 @@ export async function updateTrackMetadata(
       trackId,
     ]
   );
+}
+
+// Guarda edición manual del usuario (carátula 1:1, título, artista y letras) protegida ante re-escaneos
+export async function saveEditedTrackData(
+  trackId: string,
+  data: {
+    title: string;
+    artist: string;
+    artworkUri: string | null;
+    dominantColor: string | null;
+    lyricsText?: string | null;
+  }
+): Promise<void> {
+  const db = await getDatabase();
+  const cleanTitle = data.title.trim() || 'Sin título';
+  const cleanArtist = data.artist.trim() || 'Artista desconocido';
+
+  if (data.lyricsText !== undefined) {
+    const cleanLyrics = data.lyricsText?.trim() ?? '';
+    await db.runAsync(
+      `UPDATE tracks
+       SET title = ?,
+           artist = ?,
+           artwork_uri = ?,
+           dominant_color = ?,
+           lyrics_text = ?,
+           has_lyrics = ?,
+           is_custom_edited = 1
+       WHERE id = ?`,
+      [
+        cleanTitle,
+        cleanArtist,
+        data.artworkUri,
+        data.dominantColor,
+        cleanLyrics,
+        cleanLyrics.length > 0 ? 1 : 0,
+        trackId,
+      ]
+    );
+  } else {
+    await db.runAsync(
+      `UPDATE tracks
+       SET title = ?,
+           artist = ?,
+           artwork_uri = ?,
+           dominant_color = ?,
+           is_custom_edited = 1
+       WHERE id = ?`,
+      [cleanTitle, cleanArtist, data.artworkUri, data.dominantColor, trackId]
+    );
+  }
 }
 
 // Obtiene la letra almacenada en SQLite para una pista

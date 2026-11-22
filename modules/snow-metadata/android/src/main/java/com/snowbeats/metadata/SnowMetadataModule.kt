@@ -1,6 +1,7 @@
 package com.snowbeats.metadata
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,6 +20,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -43,6 +45,12 @@ import kotlin.math.sin
 
 class SnowMetadataModule : Module() {
   private var pendingStoragePermPromise: Promise? = null
+  private var pendingLyricsFilePromise: Promise? = null
+
+  companion object {
+    private const val LYRICS_FILE_REQUEST_CODE = 5095
+    private const val MAX_LYRICS_FILE_BYTES = 512 * 1024
+  }
 
   override fun definition() = ModuleDefinition {
     Name("SnowMetadata")
@@ -73,6 +81,17 @@ class SnowMetadataModule : Module() {
         }
         pendingStoragePermPromise?.resolve(granted)
         pendingStoragePermPromise = null
+      } else if (payload.requestCode == LYRICS_FILE_REQUEST_CODE) {
+        val promise = pendingLyricsFilePromise
+        pendingLyricsFilePromise = null
+        val ctx = appContext.reactContext
+        if (promise != null) {
+          if (payload.resultCode != Activity.RESULT_OK || payload.data?.data == null || ctx == null) {
+            promise.resolve(mapOf("ok" to false, "cancelled" to true))
+          } else {
+            promise.resolve(readPickedLyricsDocument(ctx, payload.data!!.data!!))
+          }
+        }
       }
     }
 
@@ -80,6 +99,8 @@ class SnowMetadataModule : Module() {
       SnowMediaNotificationService.actionListener = null
       pendingStoragePermPromise?.resolve(false)
       pendingStoragePermPromise = null
+      pendingLyricsFilePromise?.resolve(mapOf("ok" to false, "cancelled" to true))
+      pendingLyricsFilePromise = null
     }
 
     // Extrae etiquetas ID3, guarda la portada en caché y devuelve el color dominante hex
@@ -335,6 +356,43 @@ class SnowMetadataModule : Module() {
     // Cancela una descarga activa de yt-dlp por su taskId
     AsyncFunction("cancelDownload") { taskId: String ->
       SnowDownloaderEngine.cancelDownload(taskId)
+    }
+
+    // Guarda la carátula 1:1 recortada en almacenamiento interno persistente y extrae color dominante
+    AsyncFunction("persistCoverImage") { sourceUri: String, trackId: String ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction null
+      persistCustomCoverImage(ctx, sourceUri, trackId)
+    }
+
+    // Abre el selector nativo de documentos Android para importar archivos .lrc o .txt
+    AsyncFunction("pickLyricsFile") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) {
+        promise.resolve(
+          mapOf(
+            "ok" to false,
+            "errorMessage" to "No hay actividad activa para abrir el selector de archivos."
+          )
+        )
+        return@AsyncFunction
+      }
+      pendingLyricsFilePromise?.resolve(mapOf("ok" to false, "cancelled" to true))
+      pendingLyricsFilePromise = promise
+      try {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+          addCategory(Intent.CATEGORY_OPENABLE)
+          type = "*/*"
+        }
+        activity.startActivityForResult(intent, LYRICS_FILE_REQUEST_CODE)
+      } catch (e: Exception) {
+        pendingLyricsFilePromise = null
+        promise.resolve(
+          mapOf(
+            "ok" to false,
+            "errorMessage" to (e.message ?: "No se pudo abrir el selector de archivos.")
+          )
+        )
+      }
     }
   }
 
@@ -1095,5 +1153,129 @@ class SnowMetadataModule : Module() {
       return i
     }
     return -1
+  }
+
+  // ==================== EDICIÓN DE CARÁTULA 1:1 E IMPORTACIÓN DE LETRAS ====================
+
+  private fun persistCustomCoverImage(
+    ctx: Context,
+    sourceUri: String,
+    trackId: String
+  ): Map<String, String?>? {
+    var rawBmp: Bitmap? = null
+    var squareBmp: Bitmap? = null
+    var finalBmp: Bitmap? = null
+    return try {
+      val parsed = Uri.parse(sourceUri)
+      val inputStream: InputStream? = when {
+        sourceUri.startsWith("content://") -> ctx.contentResolver.openInputStream(parsed)
+        sourceUri.startsWith("file://") -> File(parsed.path ?: "").takeIf { it.exists() }?.inputStream()
+        else -> File(sourceUri).takeIf { it.exists() }?.inputStream()
+      }
+      rawBmp = inputStream?.use { BitmapFactory.decodeStream(it) } ?: return null
+
+      // Asegura relación cuadrada 1:1 (recorte centrado de respaldo si el picker no recortó exacto)
+      val side = min(rawBmp.width, rawBmp.height)
+      val xOff = (rawBmp.width - side) / 2
+      val yOff = (rawBmp.height - side) / 2
+      squareBmp = if (rawBmp.width == rawBmp.height) {
+        rawBmp
+      } else {
+        Bitmap.createBitmap(rawBmp, xOff, yOff, side, side)
+      }
+
+      // Escala a un máximo de 1080x1080 para mantener alta nitidez sin consumir demasiada RAM
+      finalBmp = if (squareBmp.width > 1080) {
+        Bitmap.createScaledBitmap(squareBmp, 1080, 1080, true)
+      } else {
+        squareBmp
+      }
+
+      val safeId = trackId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+      val coversDir = File(ctx.filesDir, "snow_custom_covers").apply { mkdirs() }
+      coversDir.listFiles()?.forEach { old ->
+        if (old.name.startsWith("cover_${safeId}_")) {
+          old.delete()
+        }
+      }
+
+      val outFile = File(coversDir, "cover_${safeId}_${System.currentTimeMillis()}.jpg")
+      FileOutputStream(outFile).use { fos ->
+        finalBmp.compress(Bitmap.CompressFormat.JPEG, 92, fos)
+      }
+
+      val tiny = Bitmap.createScaledBitmap(finalBmp, 1, 1, true)
+      val pixel = tiny.getPixel(0, 0)
+      tiny.recycle()
+      val dominantHex = String.format(
+        "#%02X%02X%02X",
+        Color.red(pixel),
+        Color.green(pixel),
+        Color.blue(pixel)
+      )
+
+      mapOf(
+        "artworkUri" to "file://${outFile.absolutePath}",
+        "dominantColor" to dominantHex
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      if (finalBmp != null && finalBmp !== squareBmp && finalBmp !== rawBmp) finalBmp.recycle()
+      if (squareBmp != null && squareBmp !== rawBmp) squareBmp.recycle()
+      rawBmp?.recycle()
+    }
+  }
+
+  private fun readPickedLyricsDocument(ctx: Context, uri: Uri): Map<String, Any?> {
+    return try {
+      var fileName = "letras.lrc"
+      ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+          val colIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+          if (colIdx >= 0) {
+            val name = c.getString(colIdx)
+            if (!name.isNullOrBlank()) fileName = name
+          }
+        }
+      }
+
+      val bytes = ctx.contentResolver.openInputStream(uri)?.use { stream ->
+        readUpTo(stream, MAX_LYRICS_FILE_BYTES)
+      } ?: return mapOf("ok" to false, "errorMessage" to "No se pudo abrir el archivo seleccionado.")
+
+      if (bytes.isEmpty()) {
+        return mapOf("ok" to false, "errorMessage" to "El archivo seleccionado está vacío.")
+      }
+
+      val decoded = decodeLyricsTextBytes(bytes).removePrefix("\uFEFF").trim()
+      if (decoded.isEmpty()) {
+        return mapOf("ok" to false, "errorMessage" to "No se encontró texto legible en el archivo.")
+      }
+
+      mapOf(
+        "ok" to true,
+        "fileName" to fileName,
+        "content" to decoded
+      )
+    } catch (e: Exception) {
+      mapOf(
+        "ok" to false,
+        "errorMessage" to (e.message ?: "Error leyendo el archivo de letras.")
+      )
+    }
+  }
+
+  private fun decodeLyricsTextBytes(bytes: ByteArray): String {
+    return when {
+      bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() ->
+        String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_16LE)
+      bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() ->
+        String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_16BE)
+      else -> {
+        val utf8 = String(bytes, StandardCharsets.UTF_8)
+        if (utf8.contains('\uFFFD')) String(bytes, Charset.forName("ISO-8859-1")) else utf8
+      }
+    }
   }
 }

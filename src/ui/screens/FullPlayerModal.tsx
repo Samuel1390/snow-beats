@@ -38,14 +38,21 @@ import {
     EyeOff,
     Trash2,
     Share2,
+    Pencil,
 } from 'lucide-react-native';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
-import { loadTrackLyrics, ParsedLyrics } from '../../audio-engine/lyricsParser';
+import {
+    loadTrackLyrics,
+    ParsedLyrics,
+    parseLyricsText,
+} from '../../audio-engine/lyricsParser';
 import { getDynamicPlayerPalette } from '../../theme/colorContrast';
 import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 import { AnimatedBottomSheet } from '../components/AnimatedBottomSheet';
 import { LyricsTicker } from '../components/LyricsTicker';
 import { LyricsSheetModal } from '../components/LyricsSheetModal';
+import { LyricsEditorModal } from '../components/LyricsEditorModal';
+import { EditTrackModal } from '../components/EditTrackModal';
 import { ShareCardModal } from '../components/ShareCardModal';
 
 function formatTime(sec: number): string {
@@ -119,17 +126,20 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             toggleFavorite,
             hideCurrentTrack,
             deleteCurrentTrack,
+            updateCurrentTrack,
         } = usePlayer();
 
         const { width: screenWidth, height: screenHeight } = useWindowDimensions();
         const [mounted, setMounted] = useState(visible);
         const [menuOpen, setMenuOpen] = useState(false);
+        const [editTrackOpen, setEditTrackOpen] = useState(false);
         const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
         const [speedOpen, setSpeedOpen] = useState(false);
         const [deleteOpen, setDeleteOpen] = useState(false);
         const [askDeleteAgain, setAskDeleteAgain] = useState(true);
         const [parsedLyrics, setParsedLyrics] = useState<ParsedLyrics | null>(null);
         const [lyricsSheetOpen, setLyricsSheetOpen] = useState(false);
+        const [lyricsEditorOpen, setLyricsEditorOpen] = useState(false);
         const [shareModalState, setShareModalState] = useState<{
             open: boolean;
             mode: 'song' | 'lyrics';
@@ -538,10 +548,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                     if (parsedLyrics && parsedLyrics.lines.length > 0) {
                                         setLyricsSheetOpen(true);
                                     } else {
-                                        Alert.alert(
-                                            'Letras',
-                                            'Esta canción no tiene letra incrustada ni archivo .lrc asociado.'
-                                        );
+                                        setLyricsEditorOpen(true);
                                     }
                                 }}
                             >
@@ -570,6 +577,16 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
 
                         {/* Bottom Sheet de opciones con slide-in / slide-out */}
                         <AnimatedBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
+                            <TouchableOpacity
+                                style={styles.sheetItem}
+                                onPress={() => {
+                                    setMenuOpen(false);
+                                    setEditTrackOpen(true);
+                                }}
+                            >
+                                <Pencil size={20} color="#FFFFFF" />
+                                <Text style={styles.sheetText}>Editar datos</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
                                 onPress={() => {
@@ -733,6 +750,12 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 track={currentTrack}
                                 lyrics={parsedLyrics}
                                 onClose={() => setLyricsSheetOpen(false)}
+                                onOpenEditLyrics={() => {
+                                    setLyricsSheetOpen(false);
+                                    setTimeout(() => {
+                                        setLyricsEditorOpen(true);
+                                    }, 220);
+                                }}
                                 onOpenShareLyrics={(lineIdx = 0) => {
                                     setLyricsSheetOpen(false);
                                     setTimeout(() => {
@@ -746,6 +769,45 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 }}
                             />
                         )}
+
+                        {/* Modal de edición/búsqueda/importación de letras (botón Letras sin letra o lápiz en vista de letras) */}
+                        <LyricsEditorModal
+                            visible={lyricsEditorOpen}
+                            track={currentTrack}
+                            initialLyricsText={parsedLyrics?.rawText ?? ''}
+                            saveDirectly
+                            onClose={() => setLyricsEditorOpen(false)}
+                            onSaved={(rawText) => {
+                                const nextParsed =
+                                    rawText && rawText.trim().length > 0
+                                        ? parseLyricsText(rawText)
+                                        : null;
+                                const validParsed =
+                                    nextParsed && nextParsed.lines.length > 0 ? nextParsed : null;
+                                setParsedLyrics(validParsed);
+                                updateCurrentTrack({ hasLyrics: Boolean(validParsed) });
+                                onTrackMutated?.();
+                            }}
+                        />
+
+                        {/* Carta editable estilo SongCard (carátula 1:1, título, artista y letras) */}
+                        <EditTrackModal
+                            visible={editTrackOpen}
+                            track={currentTrack}
+                            initialLyrics={parsedLyrics}
+                            onClose={() => setEditTrackOpen(false)}
+                            onSaved={(edited) => {
+                                setParsedLyrics(edited.parsedLyrics);
+                                updateCurrentTrack({
+                                    title: edited.title,
+                                    artist: edited.artist,
+                                    artworkUri: edited.artworkUri,
+                                    dominantColor: edited.dominantColor,
+                                    hasLyrics: edited.hasLyrics,
+                                });
+                                onTrackMutated?.();
+                            }}
+                        />
 
                         {/* Constructor y compartidor de tarjetas (Canción y Letra) con marca Snow Beats */}
                         <ShareCardModal

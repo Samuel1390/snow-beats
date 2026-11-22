@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
-import { ChevronDown, Pause, Play, Share2 } from 'lucide-react-native';
+import { ChevronDown, Pause, Pencil, Play, Share2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
 import { findActiveLyricIndex, LyricLine, ParsedLyrics } from '../../audio-engine/lyricsParser';
@@ -26,6 +26,7 @@ interface LyricsSheetModalProps {
     lyrics: ParsedLyrics;
     onClose: () => void;
     onOpenShareLyrics: (initialLineIndex?: number) => void;
+    onOpenEditLyrics?: () => void;
 }
 
 function formatTime(sec: number): string {
@@ -148,7 +149,7 @@ const SyncedLyricsList: React.FC<{
 });
 
 export const LyricsSheetModal: React.FC<LyricsSheetModalProps> = React.memo(
-    ({ visible, track, lyrics, onClose, onOpenShareLyrics }) => {
+    ({ visible, track, lyrics, onClose, onOpenShareLyrics, onOpenEditLyrics }) => {
         const { isPlaying, togglePlayPause, seekTo } = usePlayer();
         const { height: screenHeight } = useWindowDimensions();
         const insets = useSafeAreaInsets();
@@ -286,12 +287,22 @@ export const LyricsSheetModal: React.FC<LyricsSheetModalProps> = React.memo(
                                     {track.artist}
                                 </Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.headerIconBtn}
-                                onPress={() => onOpenShareLyrics(activeIndexRef.current)}
-                            >
-                                <Share2 size={21} color="#FFFFFF" />
-                            </TouchableOpacity>
+                            <View style={styles.headerRightGroup}>
+                                {onOpenEditLyrics && (
+                                    <TouchableOpacity
+                                        style={styles.headerIconBtn}
+                                        onPress={onOpenEditLyrics}
+                                    >
+                                        <Pencil size={19} color="#FFFFFF" />
+                                    </TouchableOpacity>
+                                )}
+                                <TouchableOpacity
+                                    style={styles.headerIconBtn}
+                                    onPress={() => onOpenShareLyrics(activeIndexRef.current)}
+                                >
+                                    <Share2 size={21} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
                         {/* Listado de letras en tiempo real */}
@@ -348,10 +359,15 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     headerIconBtn: {
-        width: 40,
-        height: 40,
+        width: 38,
+        height: 38,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    headerRightGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
     },
     headerCenter: {
         flex: 1,

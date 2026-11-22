@@ -161,3 +161,152 @@ export async function loadTrackLyrics(track: Track): Promise<ParsedLyrics | null
     lyricsMemoryCache.set(track.id, null);
     return null;
 }
+
+// Actualiza la caché RAM de letras inmediatamente después de guardar o reemplazar manualmente
+export function setCachedTrackLyrics(trackId: string, rawText: string | null): ParsedLyrics | null {
+    const clean = rawText?.trim() ?? '';
+    if (!clean) {
+        lyricsMemoryCache.set(trackId, null);
+        return null;
+    }
+    const parsed = parseLyricsText(clean);
+    const finalVal = parsed.lines.length > 0 ? parsed : null;
+    lyricsMemoryCache.set(trackId, finalVal);
+    return finalVal;
+}
+
+export function invalidateTrackLyricsCache(trackId: string): void {
+    lyricsMemoryCache.delete(trackId);
+}
+
+const UNKNOWN_ARTIST_TOKENS = new Set([
+    '',
+    'unknown',
+    'unknown artist',
+    '<unknown>',
+    'artista desconocido',
+    'desconocido',
+    'sin artista',
+    'varios artistas',
+    'various artists',
+]);
+
+function slugifyArtistForLetras(raw: string): string {
+    return raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/&/g, 'e')
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-');
+}
+
+// Genera el enlace www.letras.com/{artista}/ (o búsqueda por título si el artista es desconocido)
+export function buildLetrasComUrl(
+    artist: string,
+    title: string
+): { url: string; displayUrl: string; isSearchFallback: boolean } {
+    const cleanArtist = artist.trim();
+    const cleanTitle = title.trim();
+    const isUnknown = UNKNOWN_ARTIST_TOKENS.has(cleanArtist.toLowerCase());
+    const artistSlug = !isUnknown ? slugifyArtistForLetras(cleanArtist) : '';
+
+    if (artistSlug) {
+        return {
+            url: `https://www.letras.com/${artistSlug}/`,
+            displayUrl: `www.letras.com/${artistSlug}/`,
+            isSearchFallback: false,
+        };
+    }
+
+    const q = cleanTitle || cleanArtist || 'musica';
+    return {
+        url: `https://www.letras.com/?q=${encodeURIComponent(q)}`,
+        displayUrl: `www.letras.com/?q=${q}`,
+        isSearchFallback: true,
+    };
+}
+
+export interface LrclibCandidate {
+    id: number;
+    trackName: string;
+    artistName: string;
+    albumName: string;
+    duration: number;
+    syncedLyrics: string | null;
+    plainLyrics: string | null;
+}
+
+// Busca letras sincronizadas (.lrc) o planas en la API pública gratuita LRCLIB (sin login)
+export async function searchLrclibLyrics(
+    title: string,
+    artist: string,
+    durationSec?: number
+): Promise<LrclibCandidate[]> {
+    const cleanTitle = title.trim();
+    const cleanArtist = artist.trim();
+    const isUnknownArtist = UNKNOWN_ARTIST_TOKENS.has(cleanArtist.toLowerCase());
+
+    const runQuery = async (url: string): Promise<LrclibCandidate[]> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 9000);
+        try {
+            const resp = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                    'User-Agent': 'SnowBeats/1.0 (https://github.com/snow-beats)',
+                },
+                signal: controller.signal,
+            });
+            if (!resp.ok) return [];
+            const data = await resp.json();
+            if (!Array.isArray(data)) return [];
+            return data
+                .filter((item: any) => Boolean(item?.syncedLyrics || item?.plainLyrics))
+                .map((item: any) => ({
+                    id: Number(item.id) || Math.random(),
+                    trackName: String(item.trackName || item.name || cleanTitle),
+                    artistName: String(item.artistName || cleanArtist || 'Artista'),
+                    albumName: String(item.albumName || ''),
+                    duration: Number(item.duration) || 0,
+                    syncedLyrics:
+                        typeof item.syncedLyrics === 'string' && item.syncedLyrics.trim().length > 0
+                            ? item.syncedLyrics.trim()
+                            : null,
+                    plainLyrics:
+                        typeof item.plainLyrics === 'string' && item.plainLyrics.trim().length > 0
+                            ? item.plainLyrics.trim()
+                            : null,
+                }));
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+
+    let results: LrclibCandidate[] = [];
+    if (cleanTitle && !isUnknownArtist) {
+        const params = `track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(cleanArtist)}`;
+        results = await runQuery(`https://lrclib.net/api/search?${params}`);
+    }
+    if (results.length === 0 && cleanTitle) {
+        const query = isUnknownArtist ? cleanTitle : `${cleanTitle} ${cleanArtist}`;
+        results = await runQuery(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`);
+    }
+
+    // Prioriza resultados con .lrc sincronizado y duración cercana a la pista
+    return results
+        .sort((a, b) => {
+            const syncScoreA = a.syncedLyrics ? 0 : 1;
+            const syncScoreB = b.syncedLyrics ? 0 : 1;
+            if (syncScoreA !== syncScoreB) return syncScoreA - syncScoreB;
+            if (durationSec && durationSec > 0) {
+                return Math.abs(a.duration - durationSec) - Math.abs(b.duration - durationSec);
+            }
+            return 0;
+        })
+        .slice(0, 6);
+}
+
