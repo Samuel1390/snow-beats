@@ -124,7 +124,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                         onPress={toggleSelectAll}
                     >
                         <View style={[styles.checkCircle, allSelected && styles.checkCircleActive]}>
-                            {allSelected && <Check size={14} color="#111114" strokeWidth={3} />}
+                            {allSelected && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
                         </View>
                         <Text style={styles.selectAllText}>Seleccionar todo</Text>
                         <Text style={styles.selectCountBadge}>
@@ -144,7 +144,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                             >
                                 <Music
                                     size={14}
-                                    color={formatTab === 'audio' ? '#111114' : '#A1A1AA'}
+                                    color={formatTab === 'audio' ? '#FFFFFF' : '#94A3B8'}
                                 />
                                 <Text
                                     style={[
@@ -164,7 +164,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                             >
                                 <Film
                                     size={14}
-                                    color={formatTab === 'video' ? '#111114' : '#A1A1AA'}
+                                    color={formatTab === 'video' ? '#FFFFFF' : '#94A3B8'}
                                 />
                                 <Text
                                     style={[
@@ -227,7 +227,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                                         ]}
                                     >
                                         {checked && (
-                                            <Check size={14} color="#111114" strokeWidth={3} />
+                                            <Check size={14} color="#FFFFFF" strokeWidth={3} />
                                         )}
                                     </View>
 
@@ -273,7 +273,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                             activeOpacity={0.85}
                             onPress={handleConfirm}
                         >
-                            <Download size={19} color="#111114" />
+                            <Download size={19} color="#FFFFFF" />
                             <Text style={styles.downloadAllText}>
                                 Descargar ({selectedIds.size})
                             </Text>
@@ -288,7 +288,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#121214',
+        backgroundColor: '#0A1122',
     },
     header: {
         flexDirection: 'row',
@@ -345,18 +345,20 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 999,
-        backgroundColor: '#1F1F24',
+        backgroundColor: '#131E3A',
     },
     typePillActive: {
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
     },
     typePillText: {
-        color: '#A1A1AA',
+        color: '#94A3B8',
         fontSize: 12.5,
         fontWeight: '700',
     },
     typePillTextActive: {
-        color: '#111114',
+        color: '#FFFFFF',
     },
     qualityChips: {
         gap: 8,
@@ -365,21 +367,21 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 10,
-        backgroundColor: '#1C1C21',
+        backgroundColor: '#111B33',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
+        borderColor: 'rgba(59,130,246,0.16)',
     },
     qualityChipActive: {
-        borderColor: '#FACC15',
-        backgroundColor: 'rgba(250,204,21,0.14)',
+        borderColor: '#3B82F6',
+        backgroundColor: 'rgba(30,58,138,0.45)',
     },
     qualityChipText: {
-        color: '#D4D4D8',
+        color: '#CBD5E1',
         fontSize: 12,
         fontWeight: '600',
     },
     qualityChipTextActive: {
-        color: '#FACC15',
+        color: '#93C5FD',
         fontWeight: '800',
     },
     listContent: {
@@ -398,13 +400,13 @@ const styles = StyleSheet.create({
         height: 24,
         borderRadius: 12,
         borderWidth: 2,
-        borderColor: '#71717A',
+        borderColor: '#64748B',
         justifyContent: 'center',
         alignItems: 'center',
     },
     checkCircleActive: {
-        backgroundColor: '#FACC15',
-        borderColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderColor: '#3B82F6',
     },
     thumbWrap: {
         width: 128,
@@ -462,7 +464,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingVertical: 15,
         borderRadius: 999,
     },
@@ -470,7 +474,7 @@ const styles = StyleSheet.create({
         opacity: 0.4,
     },
     downloadAllText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '800',
     },

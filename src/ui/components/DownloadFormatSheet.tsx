@@ -59,9 +59,9 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                 >
                     <View style={styles.formatLeft}>
                         {isAudio ? (
-                            <Music size={19} color={isSelected ? '#FACC15' : '#A1A1AA'} />
+                            <Music size={19} color={isSelected ? '#60A5FA' : '#94A3B8'} />
                         ) : (
-                            <Film size={19} color={isSelected ? '#FACC15' : '#A1A1AA'} />
+                            <Film size={19} color={isSelected ? '#60A5FA' : '#94A3B8'} />
                         )}
                         <View style={styles.formatMeta}>
                             <Text style={styles.formatLabel} numberOfLines={1}>
@@ -74,7 +74,7 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                     <View style={styles.formatRight}>
                         <Text style={styles.formatSize}>{formatBytes(fmt.filesize)}</Text>
                         <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
-                            {isSelected && <Check size={13} color="#111114" strokeWidth={3} />}
+                            {isSelected && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
                         </View>
                     </View>
                 </TouchableOpacity>
@@ -176,14 +176,14 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     sheet: {
-        backgroundColor: '#161618',
+        backgroundColor: '#0C1426',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 18,
         paddingTop: 10,
         maxHeight: '82%',
         borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
+        borderColor: 'rgba(59,130,246,0.22)',
     },
     handleBar: {
         width: 40,
@@ -260,10 +260,12 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         paddingHorizontal: 10,
         borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.02)',
+        backgroundColor: 'rgba(15,31,75,0.25)',
     },
     formatRowActive: {
-        backgroundColor: 'rgba(250,204,21,0.09)',
+        backgroundColor: 'rgba(30,58,138,0.45)',
+        borderWidth: 1,
+        borderColor: 'rgba(59,130,246,0.4)',
     },
     formatLeft: {
         flexDirection: 'row',
@@ -306,12 +308,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     radioOuterSelected: {
-        backgroundColor: '#FACC15',
-        borderColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderColor: '#3B82F6',
     },
     confirmBtn: {
         marginTop: 12,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingVertical: 15,
         borderRadius: 999,
         alignItems: 'center',
@@ -321,7 +325,7 @@ const styles = StyleSheet.create({
         opacity: 0.45,
     },
     confirmBtnText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '800',
     },

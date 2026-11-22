@@ -1,9 +1,0 @@
-com.snowbeats.metadata.snow-metadata-pngs-0 /home/snelo/snow-beats/modules/snow-metadata/android/build/generated/res/pngs/debug
-com.snowbeats.metadata.snow-metadata-updated_navigation_xml-1 /home/snelo/snow-beats/modules/snow-metadata/android/build/generated/updated_navigation_xml/debug
-com.snowbeats.metadata.snow-metadata-mergeDebugResources-2 /home/snelo/snow-beats/modules/snow-metadata/android/build/intermediates/incremental/debug/mergeDebugResources/merged.dir
-com.snowbeats.metadata.snow-metadata-mergeDebugResources-3 /home/snelo/snow-beats/modules/snow-metadata/android/build/intermediates/incremental/debug/mergeDebugResources/stripped.dir
-com.snowbeats.metadata.snow-metadata-debug-4 /home/snelo/snow-beats/modules/snow-metadata/android/build/intermediates/merged_res/debug/mergeDebugResources
-com.snowbeats.metadata.snow-metadata-debug-5 /home/snelo/snow-beats/modules/snow-metadata/android/build/intermediates/packaged_res/debug/packageDebugResources
-com.snowbeats.metadata.snow-metadata-debug-6 /home/snelo/snow-beats/modules/snow-metadata/android/src/debug/res
-com.snowbeats.metadata.snow-metadata-main-7 /home/snelo/snow-beats/modules/snow-metadata/android/src/main/res
-gradleHome-0 /home/snelo/.gradle

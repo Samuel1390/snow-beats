@@ -420,10 +420,12 @@ object SnowDownloaderEngine {
   // Construye la cascada de estrategias de cliente móvil spoofeado por plataforma (Paso 2)
   private fun buildPlatformStrategies(platform: String?, canonicalUrl: String): List<ExtractionStrategy> {
     return when (platform) {
+      // En Android sin runtime JS externo ni PO Token, android_vr y tv exponen DASH 720p/1080p/4K sin caer a 360p (format 18)
       "YouTube" -> listOf(
-        ExtractionStrategy(name = "yt_android_ios", extractorArgs = "youtube:player_client=android,ios"),
         ExtractionStrategy(name = "yt_android_vr", extractorArgs = "youtube:player_client=android_vr"),
-        ExtractionStrategy(name = "yt_tv_mweb", extractorArgs = "youtube:player_client=tv,mweb"),
+        ExtractionStrategy(name = "yt_tv_android_vr", extractorArgs = "youtube:player_client=tv,android_vr"),
+        ExtractionStrategy(name = "yt_tv_simply_safari", extractorArgs = "youtube:player_client=tv_simply,web_safari"),
+        ExtractionStrategy(name = "yt_android_ios", extractorArgs = "youtube:player_client=android,ios"),
         ExtractionStrategy(name = "yt_default")
       )
 
@@ -766,6 +768,7 @@ object SnowDownloaderEngine {
 
       val strategies = buildPlatformStrategies(detectedPlatform, url)
       var rawOut = ""
+      var bestMaxHeight = -1
       var lastException: Exception? = null
       var didForceUpdate = false
 
@@ -785,12 +788,29 @@ object SnowDownloaderEngine {
           val response = YoutubeDL.getInstance().execute(request, "extract_${System.currentTimeMillis()}")
           val out = response.out?.trim() ?: ""
           if (out.isNotBlank()) {
-            rawOut = out
-            lastException = null
-            break
+            // En YouTube verifica la resolución máxima: si un cliente sin PO Token solo devolvió 360p, continúa buscando 720p/1080p+
+            if (detectedPlatform == "YouTube") {
+              val (isPl, maxH) = inspectJsonResolution(out)
+              if (isPl || maxH >= 720) {
+                rawOut = out
+                bestMaxHeight = maxH
+                lastException = null
+                break
+              }
+              if (maxH > bestMaxHeight || rawOut.isBlank()) {
+                rawOut = out
+                bestMaxHeight = maxH
+                lastException = null
+              }
+              Log.i(TAG, "YouTube strategy=${strategy.name} solo devolvió ${maxH}p, probando siguiente cliente para HD...")
+            } else {
+              rawOut = out
+              lastException = null
+              break
+            }
           }
         } catch (e: Exception) {
-          lastException = e
+          if (rawOut.isBlank()) lastException = e
           Log.w(TAG, "extractMediaInfo fallo (platform=$detectedPlatform, strategy=${strategy.name}): ${buildCauseChain(e)}")
           // Si falla por bloqueo/403 y aún no actualizamos yt-dlp en esta sesión, actualiza y reintenta
           if (!didForceUpdate && isRetryableExtractorError(e)) {
@@ -919,6 +939,33 @@ object SnowDownloaderEngine {
         "errorCode" to code,
         "errorMessage" to msg
       )
+    }
+  }
+
+  // Inspecciona rápidamente si el JSON es playlist y cuál es la altura máxima de video disponible
+  private fun inspectJsonResolution(rawOut: String): Pair<Boolean, Int> {
+    return try {
+      val jsonLine = rawOut.lineSequence().lastOrNull { it.trim().startsWith("{") } ?: rawOut
+      val root = JSONObject(jsonLine)
+      val type = root.optString("_type", "video")
+      if (type == "playlist" || root.has("entries")) {
+        return Pair(true, 0)
+      }
+      var maxH = root.optInt("height", 0)
+      val formats = root.optJSONArray("formats")
+      if (formats != null) {
+        for (i in 0 until formats.length()) {
+          val f = formats.optJSONObject(i) ?: continue
+          val vcodec = f.optString("vcodec", "none")
+          if (vcodec != "none") {
+            val h = f.optInt("height", 0)
+            if (h > maxH) maxH = h
+          }
+        }
+      }
+      Pair(false, maxH)
+    } catch (_: Exception) {
+      Pair(false, 0)
     }
   }
 
@@ -1081,9 +1128,12 @@ object SnowDownloaderEngine {
           } else {
             estimatedSize
           }
-          // Selector resiliente por altura (evita fallos 403 por format_id caducados o específicos de un cliente)
-          val selector =
+          // Selector resiliente por altura: para >=480p exige resolución HD/SD real (evita caer en silencio a 360p format 18)
+          val selector = if (height >= 480) {
+            "bestvideo[height<=${height}][height>=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}][height>=480]+bestaudio/best[height<=${height}][height>=480]"
+          } else {
             "bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best"
+          }
           videoByHeight[height] = mutableMapOf(
             "id" to "video_${height}_${formatId}",
             "formatId" to selector,
@@ -1310,8 +1360,9 @@ object SnowDownloaderEngine {
               throw e
             }
 
-            // Si falló únicamente por selector de calidad rígido, reintenta con 'best' + transcodificación local FFmpeg
-            if (rawErr.contains("requested format is not available")) {
+            // En el último intento (o fuera de YouTube), si falló por selector de calidad rígido, reintenta con 'best'
+            val allowBestDowngrade = detectedPlatform != "YouTube" || idx == strategies.lastIndex
+            if (allowBestDowngrade && rawErr.contains("requested format is not available")) {
               try {
                 tempDir.listFiles()?.forEach { it.deleteRecursively() }
                 runYtDlpDownloadRequest(

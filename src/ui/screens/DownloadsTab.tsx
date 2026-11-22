@@ -195,7 +195,7 @@ const StreamingVideoPreview: React.FC<{
                 )}
                 <View style={styles.videoFallbackOverlay}>
                     <View style={styles.videoFallbackPill}>
-                        <Film size={13} color="#FACC15" />
+                        <Film size={13} color="#60A5FA" />
                         <Text style={styles.videoFallbackPillText}>
                             Vista previa protegida · Lista para descargar
                         </Text>
@@ -221,7 +221,7 @@ const StreamingVideoPreview: React.FC<{
                 {muted ? (
                     <VolumeX size={18} color="#FFFFFF" />
                 ) : (
-                    <Volume2 size={18} color="#FACC15" />
+                    <Volume2 size={18} color="#60A5FA" />
                 )}
                 <Text style={styles.muteFloatingText}>
                     {muted ? 'Silenciado' : 'Con sonido'}
@@ -320,7 +320,7 @@ const StreamingAudioPreview: React.FC<{
                 {muted ? <VolumeX size={17} color="#FFFFFF" /> : <Volume2 size={17} color="#FFFFFF" />}
             </TouchableOpacity>
             <TouchableOpacity style={[styles.audioCircleBtn, styles.audioPlayBtn]} onPress={togglePlay}>
-                {playing ? <Pause size={17} color="#111114" /> : <Play size={17} color="#111114" />}
+                {playing ? <Pause size={17} color="#FFFFFF" /> : <Play size={17} color="#FFFFFF" />}
             </TouchableOpacity>
         </View>
     );
@@ -726,7 +726,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             activeOpacity={0.85}
                             onPress={() => setStoragePermModalOpen(true)}
                         >
-                            <FolderLock size={18} color="#FACC15" />
+                            <FolderLock size={18} color="#60A5FA" />
                             <Text style={styles.permBannerText}>
                                 Permiso de almacenamiento pendiente. Toca aquí para habilitarlo.
                             </Text>
@@ -767,10 +767,10 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             onPress={handleSearchUrl}
                         >
                             {searching ? (
-                                <ActivityIndicator size="small" color="#111114" />
+                                <ActivityIndicator size="small" color="#FFFFFF" />
                             ) : (
                                 <>
-                                    <Search size={17} color="#111114" />
+                                    <Search size={17} color="#FFFFFF" />
                                     <Text style={styles.searchBtnText}>Buscar</Text>
                                 </>
                             )}
@@ -787,9 +787,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     style={[
                                         styles.platformBadge,
                                         {
-                                            borderColor: highlighted ? '#FACC15' : borderCol,
+                                            borderColor: highlighted ? '#2B52B8' : borderCol,
                                             backgroundColor: highlighted
-                                                ? 'rgba(250,204,21,0.16)'
+                                                ? 'rgba(30,58,138,0.34)'
                                                 : cardBg,
                                         },
                                     ]}
@@ -797,7 +797,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     <Text
                                         style={[
                                             styles.platformBadgeText,
-                                            { color: highlighted ? '#FACC15' : mutedColor },
+                                            { color: highlighted ? '#93C5FD' : mutedColor },
                                         ]}
                                     >
                                         {p}
@@ -818,7 +818,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     {/* Estado cargando análisis local + respaldo WebView */}
                     {searching && (
                         <View style={[styles.loadingCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
-                            <ActivityIndicator size="large" color="#FACC15" />
+                            <ActivityIndicator size="large" color="#3B82F6" />
                             <Text style={[styles.loadingText, { color: fgColor }]}>
                                 Analizando enlace (motor local + respaldo)...
                             </Text>
@@ -841,12 +841,12 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                         />
                                     ) : (
                                         <View style={[styles.playlistCover, styles.coverFallback]}>
-                                            <ListMusic size={28} color="#FACC15" />
+                                            <ListMusic size={28} color="#60A5FA" />
                                         </View>
                                     )}
                                     <View style={styles.playlistHeaderMeta}>
                                         <View style={styles.playlistPill}>
-                                            <ListMusic size={12} color="#111114" />
+                                            <ListMusic size={12} color="#FFFFFF" />
                                             <Text style={styles.playlistPillText}>
                                                 Lista · {mediaInfo.entries?.length ?? 0} elementos
                                             </Text>
@@ -915,7 +915,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 activeOpacity={0.85}
                                 onPress={handleOpenDownloadOptions}
                             >
-                                <Download size={20} color="#111114" />
+                                <Download size={20} color="#FFFFFF" />
                                 <Text style={styles.bigDownloadBtnText}>
                                     {mediaInfo.isPlaylist
                                         ? `Descargar lista (${mediaInfo.entries?.length ?? 0})`
@@ -1047,7 +1047,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                                         style={styles.queueIconBtn}
                                                         onPress={() => handleRetryTask(item.id)}
                                                     >
-                                                        <RotateCcw size={16} color="#FACC15" />
+                                                        <RotateCcw size={16} color="#60A5FA" />
                                                     </TouchableOpacity>
                                                 )}
 
@@ -1154,7 +1154,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     <View style={styles.permOverlay}>
                         <View style={styles.permCard}>
                             <View style={styles.permIconCircle}>
-                                <FolderLock size={28} color="#FACC15" />
+                                <FolderLock size={28} color="#60A5FA" />
                             </View>
                             <Text style={styles.permTitle}>Permiso de almacenamiento</Text>
                             <Text style={styles.permBody}>
@@ -1227,16 +1227,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-        backgroundColor: 'rgba(250,204,21,0.14)',
+        backgroundColor: 'rgba(15,31,75,0.68)',
         borderWidth: 1,
-        borderColor: 'rgba(250,204,21,0.35)',
+        borderColor: 'rgba(59,130,246,0.42)',
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderRadius: 12,
     },
     permBannerText: {
         flex: 1,
-        color: '#FEF08A',
+        color: '#BFDBFE',
         fontSize: 12.5,
         fontWeight: '600',
     },
@@ -1262,13 +1262,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingHorizontal: 14,
         paddingVertical: 10,
         borderRadius: 10,
     },
     searchBtnText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 13.5,
         fontWeight: '800',
     },
@@ -1420,7 +1422,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     audioPlayBtn: {
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
     },
     playlistPreviewHeader: {
         flexDirection: 'row',
@@ -1431,7 +1435,7 @@ const styles = StyleSheet.create({
         width: 96,
         height: 72,
         borderRadius: 10,
-        backgroundColor: '#1F2937',
+        backgroundColor: '#0F1B35',
     },
     playlistHeaderMeta: {
         flex: 1,
@@ -1442,13 +1446,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         alignSelf: 'flex-start',
         gap: 5,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingHorizontal: 8,
         paddingVertical: 3,
         borderRadius: 999,
     },
     playlistPillText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '800',
     },
@@ -1474,12 +1480,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingVertical: 14,
         borderRadius: 14,
     },
     bigDownloadBtnText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '800',
     },
@@ -1569,13 +1577,13 @@ const styles = StyleSheet.create({
     progressBarTrack: {
         height: 7,
         borderRadius: 4,
-        backgroundColor: 'rgba(255,255,255,0.14)',
+        backgroundColor: 'rgba(15,31,75,0.65)',
         overflow: 'hidden',
     },
     progressBarFill: {
         height: '100%',
         borderRadius: 4,
-        backgroundColor: '#FACC15',
+        backgroundColor: '#2563EB',
     },
     progressLabelRow: {
         flexDirection: 'row',
@@ -1583,7 +1591,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     downloadingStatusText: {
-        color: '#FACC15',
+        color: '#60A5FA',
         fontSize: 12,
         fontWeight: '700',
     },
@@ -1635,19 +1643,21 @@ const styles = StyleSheet.create({
     permCard: {
         width: '100%',
         maxWidth: 360,
-        backgroundColor: '#161822',
+        backgroundColor: '#0D172E',
         borderRadius: 20,
         padding: 22,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(59,130,246,0.24)',
         gap: 10,
     },
     permIconCircle: {
         width: 56,
         height: 56,
         borderRadius: 28,
-        backgroundColor: 'rgba(250,204,21,0.14)',
+        backgroundColor: 'rgba(30,58,138,0.42)',
+        borderWidth: 1,
+        borderColor: 'rgba(59,130,246,0.35)',
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 4,
@@ -1659,7 +1669,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     permBody: {
-        color: '#A1A1AA',
+        color: '#94A3B8',
         fontSize: 13.5,
         lineHeight: 20,
         textAlign: 'center',
@@ -1667,13 +1677,15 @@ const styles = StyleSheet.create({
     },
     permAllowBtn: {
         width: '100%',
-        backgroundColor: '#FACC15',
+        backgroundColor: '#1E3A8A',
+        borderWidth: 1,
+        borderColor: '#2B52B8',
         paddingVertical: 13,
         borderRadius: 12,
         alignItems: 'center',
     },
     permAllowText: {
-        color: '#111114',
+        color: '#FFFFFF',
         fontSize: 14.5,
         fontWeight: '800',
     },
