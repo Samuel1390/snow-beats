@@ -14,20 +14,25 @@ export const LyricsTicker: React.FC<LyricsTickerProps> = React.memo(({ lyrics, o
     const { position } = usePlayerProgress();
 
     const activeIndex = useMemo(() => {
-        if (!lyrics.isSynced) return 0;
+        if (!lyrics.isSynced) return -1;
         const idx = findActiveLyricIndex(lyrics.lines, position);
         return idx >= 0 ? idx : 0;
     }, [lyrics, position]);
 
-    const currentLine = lyrics.lines[activeIndex]?.text ?? '';
-    const nextLine = lyrics.lines[activeIndex + 1]?.text ?? '';
+    const currentLine = lyrics.isSynced
+        ? lyrics.lines[activeIndex]?.text ?? ''
+        : lyrics.lines[0]?.text ?? '';
+    const nextLine = lyrics.isSynced
+        ? lyrics.lines[activeIndex + 1]?.text ?? ''
+        : lyrics.lines[1]?.text ?? '';
 
     const slideAnim = useRef(new Animated.Value(0)).current;
     const opacityAnim = useRef(new Animated.Value(1)).current;
     const prevIdxRef = useRef(activeIndex);
 
-    // Anima de abajo hacia arriba cada vez que cambia la línea cantada
+    // Anima de abajo hacia arriba únicamente cuando existen marcas de tiempo sincronizadas
     useEffect(() => {
+        if (!lyrics.isSynced || activeIndex < 0) return;
         if (prevIdxRef.current === activeIndex) return;
         prevIdxRef.current = activeIndex;
 
@@ -47,29 +52,41 @@ export const LyricsTicker: React.FC<LyricsTickerProps> = React.memo(({ lyrics, o
                 useNativeDriver: true,
             }),
         ]).start();
-    }, [activeIndex, slideAnim, opacityAnim]);
+    }, [activeIndex, lyrics.isSynced, slideAnim, opacityAnim]);
 
     if (!currentLine) return null;
 
     return (
         <TouchableOpacity style={styles.card} activeOpacity={0.82} onPress={onPress}>
             <View style={styles.textClip}>
-                <Animated.View
-                    style={[
-                        styles.linesContainer,
-                        {
-                            opacity: opacityAnim,
-                            transform: [{ translateY: slideAnim }],
-                        },
-                    ]}
-                >
-                    <Text style={styles.activeLine} numberOfLines={2} ellipsizeMode="tail">
-                        {currentLine}
-                    </Text>
-                    <Text style={styles.nextLine} numberOfLines={1} ellipsizeMode="tail">
-                        {nextLine || ' '}
-                    </Text>
-                </Animated.View>
+                {lyrics.isSynced ? (
+                    <Animated.View
+                        style={[
+                            styles.linesContainer,
+                            {
+                                opacity: opacityAnim,
+                                transform: [{ translateY: slideAnim }],
+                            },
+                        ]}
+                    >
+                        <Text style={styles.activeLine} numberOfLines={2} ellipsizeMode="tail">
+                            {currentLine}
+                        </Text>
+                        <Text style={styles.nextLine} numberOfLines={1} ellipsizeMode="tail">
+                            {nextLine || ' '}
+                        </Text>
+                    </Animated.View>
+                ) : (
+                    // Sin marcas de tiempo: no se resalta ninguna línea durante la reproducción (control manual)
+                    <View style={styles.linesContainer}>
+                        <Text style={styles.manualLine} numberOfLines={1} ellipsizeMode="tail">
+                            {currentLine}
+                        </Text>
+                        <Text style={styles.manualLine} numberOfLines={1} ellipsizeMode="tail">
+                            {nextLine || 'Toca para desplazar la letra manualmente'}
+                        </Text>
+                    </View>
+                )}
             </View>
             <View style={styles.expandBadge}>
                 <Maximize2 size={14} color="rgba(255,255,255,0.82)" />
@@ -119,6 +136,12 @@ const styles = StyleSheet.create({
         lineHeight: 17,
         height: 17,
         marginTop: 3,
+    },
+    manualLine: {
+        color: 'rgba(255, 255, 255, 0.72)',
+        fontSize: 13.5,
+        fontWeight: '500',
+        lineHeight: 20,
     },
     expandBadge: {
         width: 28,

@@ -106,21 +106,36 @@ const SyncedLyricsList: React.FC<{
                 viewportHeightRef.current = e.nativeEvent.layout.height;
             }}
         >
+            {!lyrics.isSynced && (
+                <Text style={styles.manualNotice}>
+                    Sin marcas de tiempo · desplazamiento manual
+                </Text>
+            )}
             {lyrics.lines.map((line: LyricLine, idx: number) => {
                 const isActive = lyrics.isSynced && idx === activeIndex;
                 const isPast = lyrics.isSynced && activeIndex >= 0 && idx < activeIndex;
                 const textColor = !lyrics.isSynced
-                    ? '#FFFFFF'
+                    ? 'rgba(255, 255, 255, 0.80)'
                     : isActive
                     ? palette.activeText
                     : isPast
                     ? palette.pastText
                     : palette.upcomingText;
 
+                if (!lyrics.isSynced) {
+                    return (
+                        <View key={line.id} style={styles.lineTouchable}>
+                            <Text style={[styles.lyricTextManual, { color: textColor }]}>
+                                {line.text}
+                            </Text>
+                        </View>
+                    );
+                }
+
                 return (
                     <TouchableOpacity
                         key={line.id}
-                        activeOpacity={lyrics.isSynced ? 0.72 : 1}
+                        activeOpacity={0.72}
                         onLayout={(e) => {
                             lineYRef.current[idx] = e.nativeEvent.layout.y;
                         }}
@@ -391,6 +406,12 @@ const styles = StyleSheet.create({
         paddingTop: 18,
         paddingBottom: 90,
     },
+    manualNotice: {
+        color: 'rgba(255, 255, 255, 0.56)',
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 10,
+    },
     lineTouchable: {
         paddingVertical: 10,
     },
@@ -398,6 +419,11 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: '700',
         lineHeight: 31,
+    },
+    lyricTextManual: {
+        fontSize: 20,
+        fontWeight: '500',
+        lineHeight: 30,
     },
     lyricTextActive: {
         fontSize: 25,

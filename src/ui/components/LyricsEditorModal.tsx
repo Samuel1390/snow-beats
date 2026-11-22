@@ -1,20 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     KeyboardAvoidingView,
     Linking,
-    Modal,
     Platform,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    useColorScheme,
     View,
 } from 'react-native';
 import {
     Check,
+    ClipboardPaste,
+    Copy,
     ExternalLink,
     FileUp,
     Globe,
@@ -24,7 +26,11 @@ import {
     X,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { pickLyricsFile } from '../../../modules/snow-metadata';
+import {
+    copyTextToClipboard,
+    pickLyricsFile,
+    readClipboardText,
+} from '../../../modules/snow-metadata';
 import {
     buildLetrasComUrl,
     LrclibCandidate,
@@ -33,6 +39,7 @@ import {
     setCachedTrackLyrics,
 } from '../../audio-engine/lyricsParser';
 import { updateTrackLyrics } from '../../storage/database/db';
+import { resolveIsDarkMode, useTheme } from '../../theme/ThemeContext';
 import { Track } from '../../types/music';
 
 interface LyricsEditorModalProps {
@@ -47,6 +54,57 @@ interface LyricsEditorModalProps {
     onSaved: (rawLyrics: string | null) => void;
 }
 
+interface NeutralPalette {
+    rootBg: string;
+    cardBg: string;
+    inputBg: string;
+    border: string;
+    strongBorder: string;
+    text: string;
+    muted: string;
+    primaryBg: string;
+    primaryText: string;
+    secondaryBg: string;
+    secondaryText: string;
+    pillBg: string;
+    pillText: string;
+}
+
+function getNeutralPalette(isDark: boolean): NeutralPalette {
+    if (isDark) {
+        return {
+            rootBg: '#000000',
+            cardBg: '#121212',
+            inputBg: '#1C1C1C',
+            border: '#2B2B2B',
+            strongBorder: '#3F3F46',
+            text: '#FFFFFF',
+            muted: '#A1A1AA',
+            primaryBg: '#FFFFFF',
+            primaryText: '#000000',
+            secondaryBg: '#1C1C1C',
+            secondaryText: '#FFFFFF',
+            pillBg: '#262626',
+            pillText: '#E4E4E7',
+        };
+    }
+    return {
+        rootBg: '#FFFFFF',
+        cardBg: '#F4F4F5',
+        inputBg: '#FFFFFF',
+        border: '#D4D4D8',
+        strongBorder: '#A1A1AA',
+        text: '#000000',
+        muted: '#52525B',
+        primaryBg: '#000000',
+        primaryText: '#FFFFFF',
+        secondaryBg: '#FFFFFF',
+        secondaryText: '#000000',
+        pillBg: '#E4E4E7',
+        pillText: '#18181B',
+    };
+}
+
 function formatSec(sec: number): string {
     if (!sec || sec <= 0 || !Number.isFinite(sec)) return '--:--';
     const s = Math.floor(sec);
@@ -54,10 +112,9 @@ function formatSec(sec: number): string {
     return `${m}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
-// Editor e importador completo de letras: letras.com en navegador, LRCLIB automático, archivo .lrc/.txt y pegado manual
-export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
+// Overlay neutro de pantalla completa (sin Modal nativo anidado para evitar cierres/bloqueos en Android Fabric)
+const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = React.memo(
     ({
-        visible,
         track,
         initialLyricsText,
         titleOverride,
@@ -67,25 +124,34 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
         onSaved,
     }) => {
         const insets = useSafeAreaInsets();
+        const { theme } = useTheme();
+        const systemScheme = useColorScheme();
+        const isDark = resolveIsDarkMode(theme.mode, systemScheme);
+        const ui = useMemo(() => getNeutralPalette(isDark), [isDark]);
+
         const effectiveTitle = (titleOverride ?? track.title).trim();
         const effectiveArtist = (artistOverride ?? track.artist).trim();
 
         const [draftText, setDraftText] = useState(initialLyricsText);
         const [saving, setSaving] = useState(false);
         const [importingFile, setImportingFile] = useState(false);
-        const [importedFileName, setImportedFileName] = useState<string | null>(null);
+        const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
         const [searchingAuto, setSearchingAuto] = useState(false);
         const [autoError, setAutoError] = useState<string | null>(null);
         const [autoResults, setAutoResults] = useState<LrclibCandidate[]>([]);
 
+        // Solo reinicia el borrador si cambia de canción mientras el editor está abierto
+        const lastTrackIdRef = useRef(track.id);
         useEffect(() => {
-            if (!visible) return;
-            setDraftText(initialLyricsText);
-            setImportedFileName(null);
-            setAutoError(null);
-            setAutoResults([]);
-        }, [visible, initialLyricsText, track.id]);
+            if (lastTrackIdRef.current !== track.id) {
+                lastTrackIdRef.current = track.id;
+                setDraftText(initialLyricsText);
+                setStatusNotice(null);
+                setAutoError(null);
+                setAutoResults([]);
+            }
+        }, [track.id, initialLyricsText]);
 
         const letrasInfo = useMemo(
             () => buildLetrasComUrl(effectiveArtist, effectiveTitle),
@@ -118,7 +184,7 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                 );
                 if (candidates.length === 0) {
                     setAutoError(
-                        'No se encontraron coincidencias automáticas en LRCLIB. Puedes buscar en letras.com o pegar la letra.'
+                        'No se encontraron coincidencias en LRCLIB. Busca en letras.com o pega la letra manualmente.'
                     );
                 } else {
                     setAutoResults(candidates);
@@ -136,17 +202,16 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
             const chosen = candidate.syncedLyrics || candidate.plainLyrics || '';
             if (!chosen) return;
             setDraftText(chosen);
-            setImportedFileName(
+            setStatusNotice(
                 candidate.syncedLyrics
-                    ? `LRCLIB (.lrc sincronizada) · ${candidate.trackName}`
-                    : `LRCLIB (texto plano) · ${candidate.trackName}`
+                    ? `Cargado desde LRCLIB (.lrc sincronizada) · ${candidate.trackName}`
+                    : `Cargado desde LRCLIB (texto plano) · ${candidate.trackName}`
             );
             setAutoResults([]);
             setAutoError(null);
         }, []);
 
         const handleImportLyricsFile = useCallback(async () => {
-            // En web usa un input file estándar del navegador
             if (Platform.OS === 'web' && typeof document !== 'undefined') {
                 const input = document.createElement('input');
                 input.type = 'file';
@@ -161,7 +226,7 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                             return;
                         }
                         setDraftText(content);
-                        setImportedFileName(file.name);
+                        setStatusNotice(`Importado: ${file.name}`);
                     } catch {
                         Alert.alert('Error', 'No se pudo leer el archivo seleccionado.');
                     }
@@ -182,11 +247,46 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                     return;
                 }
                 setDraftText(result.content);
-                setImportedFileName(result.fileName || 'Archivo importado');
+                setStatusNotice(`Importado: ${result.fileName || 'Archivo de letras'}`);
             } finally {
                 setImportingFile(false);
             }
         }, []);
+
+        const handlePasteClipboard = useCallback(async () => {
+            try {
+                let pasted = '';
+                if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+                    pasted = await navigator.clipboard.readText();
+                } else {
+                    pasted = await readClipboardText();
+                }
+                const clean = pasted.replace(/^\uFEFF/, '').trim();
+                if (!clean) {
+                    Alert.alert('Portapapeles vacío', 'No hay texto copiado en el portapapeles.');
+                    return;
+                }
+                setDraftText(clean);
+                setStatusNotice('Letra pegada desde el portapapeles.');
+            } catch {
+                Alert.alert('Error', 'No se pudo leer el portapapeles. Pega directamente en el cuadro.');
+            }
+        }, []);
+
+        const handleCopyLyrics = useCallback(async () => {
+            const clean = draftText.trim();
+            if (!clean) return;
+            try {
+                if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+                    await navigator.clipboard.writeText(clean);
+                } else {
+                    await copyTextToClipboard(clean);
+                }
+                setStatusNotice('Letra copiada al portapapeles.');
+            } catch {
+                Alert.alert('Error', 'No se pudo copiar la letra.');
+            }
+        }, [draftText]);
 
         const handleSave = useCallback(async () => {
             const cleaned = draftText.trim();
@@ -213,18 +313,13 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
 
         const handleClearLyrics = useCallback(() => {
             setDraftText('');
-            setImportedFileName(null);
+            setStatusNotice(null);
         }, []);
 
         return (
-            <Modal
-                visible={visible}
-                animationType="slide"
-                statusBarTranslucent
-                onRequestClose={onClose}
-            >
+            <View style={[styles.overlayRoot, { backgroundColor: ui.rootBg }]}>
                 <KeyboardAvoidingView
-                    style={styles.root}
+                    style={styles.flexOne}
                     behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 >
                     <View
@@ -236,31 +331,43 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                             },
                         ]}
                     >
-                        {/* Cabecera superior */}
-                        <View style={styles.header}>
-                            <TouchableOpacity style={styles.iconBtn} onPress={onClose}>
-                                <X size={22} color="#FFFFFF" />
+                        {/* Cabecera superior monocromática */}
+                        <View style={[styles.header, { borderBottomColor: ui.border }]}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.iconBtn,
+                                    { backgroundColor: ui.cardBg, borderColor: ui.border },
+                                ]}
+                                onPress={onClose}
+                            >
+                                <X size={20} color={ui.text} />
                             </TouchableOpacity>
                             <View style={styles.headerMeta}>
-                                <Text style={styles.headerTitle} numberOfLines={1}>
+                                <Text style={[styles.headerTitle, { color: ui.text }]} numberOfLines={1}>
                                     {hadInitialLyrics ? 'Editar o reemplazar letras' : 'Agregar letras'}
                                 </Text>
-                                <Text style={styles.headerSub} numberOfLines={1}>
+                                <Text style={[styles.headerSub, { color: ui.muted }]} numberOfLines={1}>
                                     {effectiveTitle} · {effectiveArtist}
                                 </Text>
                             </View>
                             <TouchableOpacity
-                                style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+                                style={[
+                                    styles.saveBtn,
+                                    { backgroundColor: ui.primaryBg },
+                                    saving && { opacity: 0.6 },
+                                ]}
                                 disabled={saving}
                                 activeOpacity={0.85}
                                 onPress={handleSave}
                             >
                                 {saving ? (
-                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                    <ActivityIndicator size="small" color={ui.primaryText} />
                                 ) : (
                                     <>
-                                        <Check size={16} color="#FFFFFF" />
-                                        <Text style={styles.saveBtnText}>Guardar</Text>
+                                        <Check size={16} color={ui.primaryText} />
+                                        <Text style={[styles.saveBtnText, { color: ui.primaryText }]}>
+                                            Guardar
+                                        </Text>
                                     </>
                                 )}
                             </TouchableOpacity>
@@ -272,40 +379,68 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                             keyboardShouldPersistTaps="handled"
                             showsVerticalScrollIndicator={false}
                         >
-                            {/* Bloque 1: Enlace directo www.letras.com/{artista}/ + botón Buscar */}
-                            <View style={styles.card}>
+                            {/* Bloque 1: Enlace directo https://www.letras.com/{artista}/{titulo}/ + botón Buscar */}
+                            <View
+                                style={[
+                                    styles.card,
+                                    { backgroundColor: ui.cardBg, borderColor: ui.border },
+                                ]}
+                            >
                                 <View style={styles.cardTitleRow}>
-                                    <Globe size={16} color="#60A5FA" />
-                                    <Text style={styles.cardTitle}>Buscar en letras.com</Text>
+                                    <Globe size={16} color={ui.text} />
+                                    <Text style={[styles.cardTitle, { color: ui.text }]}>
+                                        Buscar en letras.com
+                                    </Text>
                                 </View>
-                                <Text style={styles.cardHint}>
-                                    Abre tu navegador en la página del artista para buscar, copiar o
-                                    descargar la letra e importarla aquí.
+                                <Text style={[styles.cardHint, { color: ui.muted }]}>
+                                    Abre tu navegador en el enlace de la canción para copiar o descargar
+                                    la letra e importarla aquí.
                                 </Text>
                                 <View style={styles.urlRow}>
-                                    <View style={styles.urlPill}>
-                                        <Text style={styles.urlText} numberOfLines={1}>
+                                    <View
+                                        style={[
+                                            styles.urlPill,
+                                            { backgroundColor: ui.inputBg, borderColor: ui.border },
+                                        ]}
+                                    >
+                                        <Text
+                                            style={[styles.urlText, { color: ui.text }]}
+                                            numberOfLines={1}
+                                        >
                                             {letrasInfo.displayUrl}
                                         </Text>
                                     </View>
                                     <TouchableOpacity
-                                        style={styles.navyBtn}
+                                        style={[
+                                            styles.primaryActionBtn,
+                                            { backgroundColor: ui.primaryBg },
+                                        ]}
                                         activeOpacity={0.85}
                                         onPress={handleOpenLetrasBrowser}
                                     >
-                                        <Search size={15} color="#FFFFFF" />
-                                        <Text style={styles.navyBtnText}>Buscar</Text>
-                                        <ExternalLink size={13} color="#BFDBFE" />
+                                        <Search size={15} color={ui.primaryText} />
+                                        <Text
+                                            style={[
+                                                styles.primaryActionBtnText,
+                                                { color: ui.primaryText },
+                                            ]}
+                                        >
+                                            Buscar
+                                        </Text>
+                                        <ExternalLink size={13} color={ui.primaryText} />
                                     </TouchableOpacity>
                                 </View>
                             </View>
 
-                            {/* Bloque 2: Importación rápida (LRCLIB automático + Archivo .lrc/.txt) */}
+                            {/* Bloque 2: LRCLIB automático + Importar archivo .lrc/.txt */}
                             <View style={styles.actionsRow}>
                                 <TouchableOpacity
                                     style={[
                                         styles.actionCardBtn,
-                                        styles.actionCardPrimary,
+                                        {
+                                            backgroundColor: ui.cardBg,
+                                            borderColor: ui.strongBorder,
+                                        },
                                         searchingAuto && { opacity: 0.7 },
                                     ]}
                                     activeOpacity={0.85}
@@ -313,17 +448,25 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                                     onPress={handleAutoSearchLrclib}
                                 >
                                     {searchingAuto ? (
-                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                        <ActivityIndicator size="small" color={ui.text} />
                                     ) : (
-                                        <Sparkles size={17} color="#93C5FD" />
+                                        <Sparkles size={17} color={ui.text} />
                                     )}
-                                    <Text style={styles.actionCardTitle}>Buscar auto (.lrc)</Text>
-                                    <Text style={styles.actionCardSub}>Sincronizadas en LRCLIB</Text>
+                                    <Text style={[styles.actionCardTitle, { color: ui.text }]}>
+                                        Buscar auto (.lrc)
+                                    </Text>
+                                    <Text style={[styles.actionCardSub, { color: ui.muted }]}>
+                                        Sincronizadas en LRCLIB
+                                    </Text>
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
                                     style={[
                                         styles.actionCardBtn,
+                                        {
+                                            backgroundColor: ui.cardBg,
+                                            borderColor: ui.border,
+                                        },
                                         importingFile && { opacity: 0.7 },
                                     ]}
                                     activeOpacity={0.85}
@@ -331,40 +474,68 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                                     onPress={handleImportLyricsFile}
                                 >
                                     {importingFile ? (
-                                        <ActivityIndicator size="small" color="#60A5FA" />
+                                        <ActivityIndicator size="small" color={ui.text} />
                                     ) : (
-                                        <FileUp size={17} color="#60A5FA" />
+                                        <FileUp size={17} color={ui.text} />
                                     )}
-                                    <Text style={styles.actionCardTitle}>Importar archivo</Text>
-                                    <Text style={styles.actionCardSub}>Formato .lrc o .txt</Text>
+                                    <Text style={[styles.actionCardTitle, { color: ui.text }]}>
+                                        Importar archivo
+                                    </Text>
+                                    <Text style={[styles.actionCardSub, { color: ui.muted }]}>
+                                        Formato .lrc o .txt
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Resultados automáticos de LRCLIB (el usuario elige cuál aplicar) */}
+                            {/* Avisos o coincidencias automáticas de LRCLIB */}
                             {autoError && (
-                                <View style={styles.infoBanner}>
-                                    <Text style={styles.infoBannerText}>{autoError}</Text>
+                                <View
+                                    style={[
+                                        styles.infoBanner,
+                                        { backgroundColor: ui.cardBg, borderColor: ui.strongBorder },
+                                    ]}
+                                >
+                                    <Text style={[styles.infoBannerText, { color: ui.muted }]}>
+                                        {autoError}
+                                    </Text>
                                 </View>
                             )}
 
                             {autoResults.length > 0 && (
-                                <View style={styles.card}>
-                                    <Text style={styles.cardTitle}>
+                                <View
+                                    style={[
+                                        styles.card,
+                                        { backgroundColor: ui.cardBg, borderColor: ui.border },
+                                    ]}
+                                >
+                                    <Text style={[styles.cardTitle, { color: ui.text }]}>
                                         Coincidencias encontradas (toca para cargar)
                                     </Text>
                                     <View style={styles.resultsList}>
                                         {autoResults.map((cand) => (
                                             <TouchableOpacity
                                                 key={cand.id}
-                                                style={styles.resultItem}
+                                                style={[
+                                                    styles.resultItem,
+                                                    {
+                                                        backgroundColor: ui.inputBg,
+                                                        borderColor: ui.border,
+                                                    },
+                                                ]}
                                                 activeOpacity={0.8}
                                                 onPress={() => handleApplyCandidate(cand)}
                                             >
                                                 <View style={styles.resultMeta}>
-                                                    <Text style={styles.resultTitle} numberOfLines={1}>
+                                                    <Text
+                                                        style={[styles.resultTitle, { color: ui.text }]}
+                                                        numberOfLines={1}
+                                                    >
                                                         {cand.trackName}
                                                     </Text>
-                                                    <Text style={styles.resultSub} numberOfLines={1}>
+                                                    <Text
+                                                        style={[styles.resultSub, { color: ui.muted }]}
+                                                        numberOfLines={1}
+                                                    >
                                                         {cand.artistName}
                                                         {cand.duration > 0
                                                             ? ` · ${formatSec(cand.duration)}`
@@ -375,12 +546,25 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                                                     style={[
                                                         styles.typeTag,
                                                         cand.syncedLyrics
-                                                            ? styles.typeTagSynced
-                                                            : styles.typeTagPlain,
+                                                            ? { backgroundColor: ui.primaryBg }
+                                                            : {
+                                                                  backgroundColor: ui.pillBg,
+                                                                  borderWidth: 1,
+                                                                  borderColor: ui.border,
+                                                              },
                                                     ]}
                                                 >
-                                                    <Text style={styles.typeTagText}>
-                                                        {cand.syncedLyrics ? 'LRC Sync' : 'Plana'}
+                                                    <Text
+                                                        style={[
+                                                            styles.typeTagText,
+                                                            {
+                                                                color: cand.syncedLyrics
+                                                                    ? ui.primaryText
+                                                                    : ui.pillText,
+                                                            },
+                                                        ]}
+                                                    >
+                                                        {cand.syncedLyrics ? 'LRC Sync' : 'Manual'}
                                                     </Text>
                                                 </View>
                                             </TouchableOpacity>
@@ -389,47 +573,133 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                                 </View>
                             )}
 
-                            {/* Bloque 3: Editor / Pegado directo de letras */}
-                            <View style={styles.card}>
+                            {/* Bloque 3: Editor / Pegado y copiado directo de letras */}
+                            <View
+                                style={[
+                                    styles.card,
+                                    { backgroundColor: ui.cardBg, borderColor: ui.border },
+                                ]}
+                            >
                                 <View style={styles.editorTopRow}>
                                     <View style={styles.statusCol}>
-                                        <Text style={styles.cardTitle}>Texto / archivo .lrc</Text>
-                                        <Text style={styles.statusPillText}>
+                                        <Text style={[styles.cardTitle, { color: ui.text }]}>
+                                            Texto / archivo .lrc
+                                        </Text>
+                                        <Text style={[styles.statusPillText, { color: ui.muted }]}>
                                             {parsedPreview.lines.length === 0
                                                 ? 'Sin contenido'
                                                 : parsedPreview.isSynced
                                                 ? `Sincronizada en tiempo real · ${parsedPreview.lines.length} líneas`
-                                                : `Letra plana · ${parsedPreview.lines.length} líneas`}
+                                                : `Sin tiempos · modo manual sin resaltado · ${parsedPreview.lines.length} líneas`}
                                         </Text>
                                     </View>
-                                    {draftText.trim().length > 0 && (
-                                        <TouchableOpacity
-                                            style={styles.clearBtn}
-                                            onPress={handleClearLyrics}
+                                </View>
+
+                                {/* Acciones rápidas de portapapeles para editar letras manualmente */}
+                                <View style={styles.clipboardRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.smallNeutralBtn,
+                                            {
+                                                backgroundColor: ui.secondaryBg,
+                                                borderColor: ui.border,
+                                            },
+                                        ]}
+                                        activeOpacity={0.8}
+                                        onPress={handlePasteClipboard}
+                                    >
+                                        <ClipboardPaste size={14} color={ui.secondaryText} />
+                                        <Text
+                                            style={[
+                                                styles.smallNeutralBtnText,
+                                                { color: ui.secondaryText },
+                                            ]}
                                         >
-                                            <Trash2 size={14} color="#FCA5A5" />
-                                            <Text style={styles.clearBtnText}>Quitar</Text>
-                                        </TouchableOpacity>
+                                            Pegar
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    {draftText.trim().length > 0 && (
+                                        <>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.smallNeutralBtn,
+                                                    {
+                                                        backgroundColor: ui.secondaryBg,
+                                                        borderColor: ui.border,
+                                                    },
+                                                ]}
+                                                activeOpacity={0.8}
+                                                onPress={handleCopyLyrics}
+                                            >
+                                                <Copy size={14} color={ui.secondaryText} />
+                                                <Text
+                                                    style={[
+                                                        styles.smallNeutralBtnText,
+                                                        { color: ui.secondaryText },
+                                                    ]}
+                                                >
+                                                    Copiar
+                                                </Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.smallNeutralBtn,
+                                                    {
+                                                        backgroundColor: ui.secondaryBg,
+                                                        borderColor: ui.strongBorder,
+                                                    },
+                                                ]}
+                                                activeOpacity={0.8}
+                                                onPress={handleClearLyrics}
+                                            >
+                                                <Trash2 size={14} color={ui.muted} />
+                                                <Text
+                                                    style={[
+                                                        styles.smallNeutralBtnText,
+                                                        { color: ui.muted },
+                                                    ]}
+                                                >
+                                                    Quitar
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </>
                                     )}
                                 </View>
 
-                                {importedFileName && (
-                                    <View style={styles.importedPill}>
-                                        <Check size={13} color="#86EFAC" />
-                                        <Text style={styles.importedPillText} numberOfLines={1}>
-                                            Cargado: {importedFileName}
+                                {statusNotice && (
+                                    <View
+                                        style={[
+                                            styles.noticePill,
+                                            { backgroundColor: ui.pillBg, borderColor: ui.border },
+                                        ]}
+                                    >
+                                        <Check size={13} color={ui.text} />
+                                        <Text
+                                            style={[styles.noticePillText, { color: ui.pillText }]}
+                                            numberOfLines={1}
+                                        >
+                                            {statusNotice}
                                         </Text>
                                     </View>
                                 )}
 
                                 <TextInput
-                                    style={styles.lyricsInput}
+                                    style={[
+                                        styles.lyricsInput,
+                                        {
+                                            backgroundColor: ui.inputBg,
+                                            borderColor: ui.border,
+                                            color: ui.text,
+                                        },
+                                    ]}
                                     value={draftText}
                                     onChangeText={setDraftText}
                                     placeholder={
                                         'Pega aquí la letra copiada de letras.com o contenido .lrc:\n[00:12.40] Primera línea...\n[00:16.80] Segunda línea...'
                                     }
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={ui.muted}
                                     multiline
                                     textAlignVertical="top"
                                     autoCorrect={false}
@@ -438,15 +708,31 @@ export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
                         </ScrollView>
                     </View>
                 </KeyboardAvoidingView>
-            </Modal>
+            </View>
         );
     }
 );
 
+export const LyricsEditorModal: React.FC<LyricsEditorModalProps> = React.memo(
+    ({ visible, ...rest }) => {
+        // Desmonta completamente al cerrar para evitar bloqueos de estado o de gestos en Android
+        if (!visible) return null;
+        return <LyricsEditorContent {...rest} />;
+    }
+);
+
 const styles = StyleSheet.create({
-    root: {
+    overlayRoot: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: 60,
+        elevation: 32,
+    },
+    flexOne: {
         flex: 1,
-        backgroundColor: '#0A1122',
     },
     container: {
         flex: 1,
@@ -458,13 +744,12 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         gap: 10,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(59,130,246,0.16)',
     },
     iconBtn: {
         width: 38,
         height: 38,
         borderRadius: 19,
-        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -472,12 +757,10 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     headerTitle: {
-        color: '#FFFFFF',
         fontSize: 16.5,
         fontWeight: '800',
     },
     headerSub: {
-        color: '#94A3B8',
         fontSize: 12.5,
         marginTop: 1,
     },
@@ -485,15 +768,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: '#1E3A8A',
-        borderWidth: 1,
-        borderColor: '#2B52B8',
         paddingHorizontal: 14,
         paddingVertical: 9,
         borderRadius: 10,
     },
     saveBtnText: {
-        color: '#FFFFFF',
         fontSize: 13.5,
         fontWeight: '800',
     },
@@ -506,10 +785,8 @@ const styles = StyleSheet.create({
         paddingBottom: 32,
     },
     card: {
-        backgroundColor: '#0F1A33',
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(59,130,246,0.2)',
         padding: 14,
         gap: 10,
     },
@@ -519,12 +796,10 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     cardTitle: {
-        color: '#FFFFFF',
         fontSize: 14.5,
         fontWeight: '700',
     },
     cardHint: {
-        color: '#94A3B8',
         fontSize: 12.5,
         lineHeight: 18,
     },
@@ -535,31 +810,24 @@ const styles = StyleSheet.create({
     },
     urlPill: {
         flex: 1,
-        backgroundColor: '#091020',
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: 'rgba(148,163,184,0.22)',
         paddingHorizontal: 11,
         paddingVertical: 10,
     },
     urlText: {
-        color: '#93C5FD',
-        fontSize: 12.5,
+        fontSize: 12,
         fontWeight: '600',
     },
-    navyBtn: {
+    primaryActionBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: '#1E3A8A',
-        borderWidth: 1,
-        borderColor: '#2B52B8',
         paddingHorizontal: 13,
         paddingVertical: 10,
         borderRadius: 10,
     },
-    navyBtnText: {
-        color: '#FFFFFF',
+    primaryActionBtnText: {
         fontSize: 13,
         fontWeight: '800',
     },
@@ -569,36 +837,25 @@ const styles = StyleSheet.create({
     },
     actionCardBtn: {
         flex: 1,
-        backgroundColor: '#0F1A33',
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: 'rgba(59,130,246,0.22)',
         padding: 13,
         gap: 4,
     },
-    actionCardPrimary: {
-        backgroundColor: '#13244C',
-        borderColor: 'rgba(59,130,246,0.42)',
-    },
     actionCardTitle: {
-        color: '#FFFFFF',
         fontSize: 13.5,
         fontWeight: '700',
         marginTop: 2,
     },
     actionCardSub: {
-        color: '#94A3B8',
         fontSize: 11.5,
     },
     infoBanner: {
-        backgroundColor: 'rgba(30,58,138,0.28)',
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: 'rgba(59,130,246,0.3)',
         padding: 12,
     },
     infoBannerText: {
-        color: '#BFDBFE',
         fontSize: 12.5,
         lineHeight: 18,
     },
@@ -609,10 +866,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-        backgroundColor: '#0A1224',
         borderRadius: 11,
         borderWidth: 1,
-        borderColor: 'rgba(59,130,246,0.18)',
         paddingHorizontal: 12,
         paddingVertical: 10,
     },
@@ -621,12 +876,10 @@ const styles = StyleSheet.create({
         gap: 2,
     },
     resultTitle: {
-        color: '#FFFFFF',
         fontSize: 13.5,
         fontWeight: '700',
     },
     resultSub: {
-        color: '#94A3B8',
         fontSize: 12,
     },
     typeTag: {
@@ -634,16 +887,7 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
         borderRadius: 999,
     },
-    typeTagSynced: {
-        backgroundColor: '#1E3A8A',
-        borderWidth: 1,
-        borderColor: '#3B82F6',
-    },
-    typeTagPlain: {
-        backgroundColor: 'rgba(148,163,184,0.18)',
-    },
     typeTagText: {
-        color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '800',
     },
@@ -658,52 +902,47 @@ const styles = StyleSheet.create({
         gap: 2,
     },
     statusPillText: {
-        color: '#60A5FA',
         fontSize: 12,
         fontWeight: '600',
     },
-    clearBtn: {
+    clipboardRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    smallNeutralBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        backgroundColor: 'rgba(239,68,68,0.16)',
         borderWidth: 1,
-        borderColor: 'rgba(248,113,113,0.35)',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8,
+        paddingHorizontal: 11,
+        paddingVertical: 7,
+        borderRadius: 9,
     },
-    clearBtnText: {
-        color: '#FCA5A5',
+    smallNeutralBtnText: {
         fontSize: 12,
         fontWeight: '700',
     },
-    importedPill: {
+    noticePill: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: 'rgba(34,197,94,0.14)',
         borderWidth: 1,
-        borderColor: 'rgba(74,222,128,0.35)',
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 8,
     },
-    importedPillText: {
+    noticePillText: {
         flex: 1,
-        color: '#86EFAC',
         fontSize: 12,
         fontWeight: '600',
     },
     lyricsInput: {
         minHeight: 220,
         maxHeight: 360,
-        backgroundColor: '#080F1E',
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: 'rgba(59,130,246,0.22)',
         padding: 12,
-        color: '#F8FAFC',
         fontSize: 13.5,
         lineHeight: 20,
     },

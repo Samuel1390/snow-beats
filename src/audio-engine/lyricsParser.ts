@@ -81,7 +81,12 @@ export function parseLyricsText(raw: string): ParsedLyrics {
         }
     }
 
-    if (syncedLines.length > 0) {
+    const nonEmptyPlainLines = rawLines
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !OFFSET_REGEX.test(l) && !METADATA_TAG_REGEX.test(l));
+
+    // Solo activa sincronización en tiempo real si realmente existen tiempos válidos (evita perder texto por una sola etiqueta)
+    if (syncedLines.length >= 2 || (syncedLines.length === 1 && nonEmptyPlainLines.length === 1)) {
         syncedLines.sort((a, b) => (a.timeSec ?? 0) - (b.timeSec ?? 0));
         return {
             lines: syncedLines,
@@ -90,15 +95,12 @@ export function parseLyricsText(raw: string): ParsedLyrics {
         };
     }
 
-    // Fallback: letra plana sin marcas de tiempo
-    const plainLines: LyricLine[] = rawLines
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0)
-        .map((text, idx) => ({
-            id: `p-${idx}`,
-            text,
-            timeSec: null,
-        }));
+    // Fallback: letra plana sin marcas de tiempo reconocidas (control manual, sin resaltado en reproducción)
+    const plainLines: LyricLine[] = nonEmptyPlainLines.map((text, idx) => ({
+        id: `p-${idx}`,
+        text,
+        timeSec: null,
+    }));
 
     return {
         lines: plainLines,
@@ -191,8 +193,9 @@ const UNKNOWN_ARTIST_TOKENS = new Set([
     'various artists',
 ]);
 
-function slugifyArtistForLetras(raw: string): string {
+function slugifyForLetras(raw: string): string {
     return raw
+        .replace(/\.(mp3|m4a|flac|wav|ogg|aac|opus)$/i, '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
@@ -203,7 +206,7 @@ function slugifyArtistForLetras(raw: string): string {
         .replace(/-+/g, '-');
 }
 
-// Genera el enlace www.letras.com/{artista}/ (o búsqueda por título si el artista es desconocido)
+// Genera el enlace https://www.letras.com/{artista}/{titulo}/ (con respaldo si falta artista o título)
 export function buildLetrasComUrl(
     artist: string,
     title: string
@@ -211,12 +214,23 @@ export function buildLetrasComUrl(
     const cleanArtist = artist.trim();
     const cleanTitle = title.trim();
     const isUnknown = UNKNOWN_ARTIST_TOKENS.has(cleanArtist.toLowerCase());
-    const artistSlug = !isUnknown ? slugifyArtistForLetras(cleanArtist) : '';
+    const artistSlug = !isUnknown ? slugifyForLetras(cleanArtist) : '';
+    const titleSlug = slugifyForLetras(cleanTitle);
+
+    if (artistSlug && titleSlug) {
+        const fullUrl = `https://www.letras.com/${artistSlug}/${titleSlug}/`;
+        return {
+            url: fullUrl,
+            displayUrl: fullUrl,
+            isSearchFallback: false,
+        };
+    }
 
     if (artistSlug) {
+        const artistUrl = `https://www.letras.com/${artistSlug}/`;
         return {
-            url: `https://www.letras.com/${artistSlug}/`,
-            displayUrl: `www.letras.com/${artistSlug}/`,
+            url: artistUrl,
+            displayUrl: artistUrl,
             isSearchFallback: false,
         };
     }
@@ -224,7 +238,7 @@ export function buildLetrasComUrl(
     const q = cleanTitle || cleanArtist || 'musica';
     return {
         url: `https://www.letras.com/?q=${encodeURIComponent(q)}`,
-        displayUrl: `www.letras.com/?q=${q}`,
+        displayUrl: `https://www.letras.com/?q=${q}`,
         isSearchFallback: true,
     };
 }

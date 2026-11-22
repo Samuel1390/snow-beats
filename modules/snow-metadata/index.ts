@@ -125,6 +125,13 @@ export interface PickedLyricsFileResult {
     errorMessage?: string;
 }
 
+export interface ClipboardImageResult {
+    ok: boolean;
+    uri?: string;
+    source?: 'clipboard_image' | 'clipboard_url';
+    errorMessage?: string;
+}
+
 interface SnowMetadataNativeModule {
     readTrackTags(uri: string, trackId: string): Promise<NativeTrackTags | null>;
     readTrackLyrics?: (uri: string) => Promise<string | null>;
@@ -145,6 +152,10 @@ interface SnowMetadataNativeModule {
     cancelDownload?: (taskId: string) => Promise<boolean>;
     persistCoverImage?: (sourceUri: string, trackId: string) => Promise<PersistedCoverResult | null>;
     pickLyricsFile?: () => Promise<PickedLyricsFileResult>;
+    readClipboardImage?: () => Promise<ClipboardImageResult>;
+    copyImageToClipboard?: (sourceUri: string) => Promise<boolean>;
+    readClipboardText?: () => Promise<string>;
+    copyTextToClipboard?: (text: string) => Promise<boolean>;
     addListener?: (eventName: string, listener: (event: any) => void) => EventSubscription;
 }
 
@@ -310,4 +321,39 @@ export async function pickLyricsFile(): Promise<PickedLyricsFileResult> {
         };
     }
     return SnowMetadata.pickLyricsFile();
+}
+
+// Lee una imagen o URL de imagen copiada en el portapapeles de Android
+export async function readClipboardImage(): Promise<ClipboardImageResult> {
+    if (!SnowMetadata || typeof SnowMetadata.readClipboardImage !== 'function') {
+        return {
+            ok: false,
+            errorMessage: 'Lectura de imagen desde el portapapeles no disponible.',
+        };
+    }
+    return SnowMetadata.readClipboardImage();
+}
+
+// Copia la carátula actual al portapapeles de Android
+export async function copyImageToClipboard(sourceUri: string): Promise<boolean> {
+    if (!SnowMetadata || typeof SnowMetadata.copyImageToClipboard !== 'function') {
+        return false;
+    }
+    return SnowMetadata.copyImageToClipboard(sourceUri);
+}
+
+// Lee texto del portapapeles de Android
+export async function readClipboardText(): Promise<string> {
+    if (!SnowMetadata || typeof SnowMetadata.readClipboardText !== 'function') {
+        return '';
+    }
+    return SnowMetadata.readClipboardText();
+}
+
+// Copia texto al portapapeles de Android
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+    if (!SnowMetadata || typeof SnowMetadata.copyTextToClipboard !== 'function') {
+        return false;
+    }
+    return SnowMetadata.copyTextToClipboard(text);
 }

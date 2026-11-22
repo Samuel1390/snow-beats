@@ -2,6 +2,8 @@ package com.snowbeats.metadata
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,6 +26,7 @@ import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.Base64
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -35,6 +38,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -393,6 +397,33 @@ class SnowMetadataModule : Module() {
           )
         )
       }
+    }
+
+    // Lee una imagen o enlace de imagen del portapapeles nativo de Android
+    AsyncFunction("readClipboardImage") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction mapOf(
+        "ok" to false,
+        "errorMessage" to "Contexto nativo no disponible."
+      )
+      readImageFromClipboard(ctx)
+    }
+
+    // Copia la imagen de carátula al portapapeles de Android vía FileProvider
+    AsyncFunction("copyImageToClipboard") { sourceUri: String ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      copyCoverImageToClipboard(ctx, sourceUri)
+    }
+
+    // Lee texto plano del portapapeles de Android (para pegar letras o URLs)
+    AsyncFunction("readClipboardText") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction ""
+      readPlainTextFromClipboard(ctx)
+    }
+
+    // Copia texto plano al portapapeles de Android
+    AsyncFunction("copyTextToClipboard") { text: String ->
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      copyPlainTextToClipboard(ctx, text)
     }
   }
 
@@ -1166,13 +1197,7 @@ class SnowMetadataModule : Module() {
     var squareBmp: Bitmap? = null
     var finalBmp: Bitmap? = null
     return try {
-      val parsed = Uri.parse(sourceUri)
-      val inputStream: InputStream? = when {
-        sourceUri.startsWith("content://") -> ctx.contentResolver.openInputStream(parsed)
-        sourceUri.startsWith("file://") -> File(parsed.path ?: "").takeIf { it.exists() }?.inputStream()
-        else -> File(sourceUri).takeIf { it.exists() }?.inputStream()
-      }
-      rawBmp = inputStream?.use { BitmapFactory.decodeStream(it) } ?: return null
+      rawBmp = decodeCoverBitmap(ctx, sourceUri) ?: return null
 
       // Asegura relación cuadrada 1:1 (recorte centrado de respaldo si el picker no recortó exacto)
       val side = min(rawBmp.width, rawBmp.height)
@@ -1224,6 +1249,156 @@ class SnowMetadataModule : Module() {
       if (finalBmp != null && finalBmp !== squareBmp && finalBmp !== rawBmp) finalBmp.recycle()
       if (squareBmp != null && squareBmp !== rawBmp) squareBmp.recycle()
       rawBmp?.recycle()
+    }
+  }
+
+  private fun decodeCoverBitmap(ctx: Context, sourceUri: String): Bitmap? {
+    val trimmed = sourceUri.trim()
+    if (trimmed.isEmpty()) return null
+    return when {
+      trimmed.startsWith("data:image/", ignoreCase = true) -> {
+        val comma = trimmed.indexOf(',')
+        if (comma < 0) return null
+        val b64 = trimmed.substring(comma + 1)
+        val bytes = Base64.decode(b64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+      }
+      trimmed.startsWith("http://", ignoreCase = true) ||
+        trimmed.startsWith("https://", ignoreCase = true) -> {
+        val conn = (URL(trimmed).openConnection() as HttpURLConnection).apply {
+          connectTimeout = 10000
+          readTimeout = 12000
+          instanceFollowRedirects = true
+          setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) SnowBeats/1.0")
+        }
+        try {
+          if (conn.responseCode in 200..299) {
+            conn.inputStream.use { BitmapFactory.decodeStream(it) }
+          } else {
+            null
+          }
+        } finally {
+          conn.disconnect()
+        }
+      }
+      trimmed.startsWith("content://", ignoreCase = true) -> {
+        ctx.contentResolver.openInputStream(Uri.parse(trimmed))?.use {
+          BitmapFactory.decodeStream(it)
+        }
+      }
+      trimmed.startsWith("file://", ignoreCase = true) -> {
+        File(Uri.parse(trimmed).path ?: "").takeIf { it.exists() }?.inputStream()?.use {
+          BitmapFactory.decodeStream(it)
+        }
+      }
+      else -> {
+        File(trimmed).takeIf { it.exists() }?.inputStream()?.use {
+          BitmapFactory.decodeStream(it)
+        }
+      }
+    }
+  }
+
+  private fun readImageFromClipboard(ctx: Context): Map<String, Any?> {
+    return try {
+      val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        ?: return mapOf("ok" to false, "errorMessage" to "Portapapeles no disponible.")
+      val clip = cm.primaryClip
+      if (clip == null || clip.itemCount == 0) {
+        return mapOf("ok" to false, "errorMessage" to "El portapapeles está vacío.")
+      }
+
+      val item = clip.getItemAt(0)
+      val clipUri = item.uri
+      if (clipUri != null) {
+        val bmp = ctx.contentResolver.openInputStream(clipUri)?.use {
+          BitmapFactory.decodeStream(it)
+        }
+        if (bmp != null) {
+          val dir = File(ctx.cacheDir, "snow_clipboard").apply { mkdirs() }
+          val out = File(dir, "clip_${System.currentTimeMillis()}.jpg")
+          FileOutputStream(out).use { fos ->
+            bmp.compress(Bitmap.CompressFormat.JPEG, 94, fos)
+          }
+          bmp.recycle()
+          return mapOf(
+            "ok" to true,
+            "uri" to "file://${out.absolutePath}",
+            "source" to "clipboard_image"
+          )
+        }
+      }
+
+      val text = item.coerceToText(ctx)?.toString()?.trim() ?: ""
+      if (
+        text.startsWith("http://", ignoreCase = true) ||
+        text.startsWith("https://", ignoreCase = true) ||
+        text.startsWith("data:image/", ignoreCase = true) ||
+        text.startsWith("file://", ignoreCase = true) ||
+        text.startsWith("content://", ignoreCase = true)
+      ) {
+        return mapOf(
+          "ok" to true,
+          "uri" to text,
+          "source" to "clipboard_url"
+        )
+      }
+
+      mapOf(
+        "ok" to false,
+        "errorMessage" to "Copia una imagen o un enlace de imagen válido antes de pegar."
+      )
+    } catch (e: Exception) {
+      mapOf(
+        "ok" to false,
+        "errorMessage" to (e.message ?: "No se pudo leer la imagen del portapapeles.")
+      )
+    }
+  }
+
+  private fun copyCoverImageToClipboard(ctx: Context, sourceUri: String): Boolean {
+    return try {
+      val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
+      val bmp = decodeCoverBitmap(ctx, sourceUri)
+      if (bmp != null) {
+        val dir = File(ctx.cacheDir, "snow_clipboard").apply { mkdirs() }
+        val out = File(dir, "copied_cover_${System.currentTimeMillis()}.jpg")
+        FileOutputStream(out).use { fos ->
+          bmp.compress(Bitmap.CompressFormat.JPEG, 94, fos)
+        }
+        bmp.recycle()
+        val authority = "${ctx.packageName}.snowbeats.fileprovider"
+        val contentUri = FileProvider.getUriForFile(ctx, authority, out)
+        val clip = ClipData.newUri(ctx.contentResolver, "Snow Beats Cover", contentUri)
+        cm.setPrimaryClip(clip)
+        true
+      } else {
+        false
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun readPlainTextFromClipboard(ctx: Context): String {
+    return try {
+      val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return ""
+      val clip = cm.primaryClip ?: return ""
+      if (clip.itemCount == 0) return ""
+      clip.getItemAt(0).coerceToText(ctx)?.toString() ?: ""
+    } catch (_: Exception) {
+      ""
+    }
+  }
+
+  private fun copyPlainTextToClipboard(ctx: Context, text: String): Boolean {
+    return try {
+      val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
+      val clip = ClipData.newPlainText("Snow Beats", text)
+      cm.setPrimaryClip(clip)
+      true
+    } catch (_: Exception) {
+      false
     }
   }
 

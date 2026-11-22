@@ -154,6 +154,18 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
         const isClosingRef = useRef(false);
         const isSlidingRef = useRef(false);
         const prevVisibleRef = useRef(false);
+        const isOverlayOpenRef = useRef(false);
+        const editTrackBackRef = useRef<(() => boolean) | null>(null);
+
+        isOverlayOpenRef.current =
+            menuOpen ||
+            editTrackOpen ||
+            lyricsEditorOpen ||
+            lyricsSheetOpen ||
+            playlistModalOpen ||
+            speedOpen ||
+            deleteOpen ||
+            shareModalState.open;
 
         // Carga perezosa de letras incrustadas/.lrc (con caché en RAM + SQLite) solo para la pista activa
         useEffect(() => {
@@ -231,12 +243,62 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             });
         }, [openAnim, dragY, onClose]);
 
-        // Gesto de deslizar hacia abajo desde CUALQUIER parte de la pantalla (protegiendo el slider horizontal)
+        // Cierre escalonado al presionar el botón físico Atrás en Android
+        const handleHardwareBack = useCallback(() => {
+            if (lyricsEditorOpen) {
+                setLyricsEditorOpen(false);
+                return;
+            }
+            if (editTrackOpen) {
+                if (editTrackBackRef.current?.()) {
+                    return;
+                }
+                setEditTrackOpen(false);
+                return;
+            }
+            if (lyricsSheetOpen) {
+                setLyricsSheetOpen(false);
+                return;
+            }
+            if (menuOpen) {
+                setMenuOpen(false);
+                return;
+            }
+            if (speedOpen) {
+                setSpeedOpen(false);
+                return;
+            }
+            if (deleteOpen) {
+                setDeleteOpen(false);
+                return;
+            }
+            if (playlistModalOpen) {
+                setPlaylistModalOpen(false);
+                return;
+            }
+            if (shareModalState.open) {
+                setShareModalState((prev) => ({ ...prev, open: false }));
+                return;
+            }
+            animateClose();
+        }, [
+            lyricsEditorOpen,
+            editTrackOpen,
+            lyricsSheetOpen,
+            menuOpen,
+            speedOpen,
+            deleteOpen,
+            playlistModalOpen,
+            shareModalState.open,
+            animateClose,
+        ]);
+
+        // Gesto de deslizar hacia abajo desde CUALQUIER parte de la pantalla (bloqueado si hay un editor/overlay abierto)
         const panResponder = useMemo(
             () =>
                 PanResponder.create({
                     onMoveShouldSetPanResponderCapture: (_, gs) => {
-                        if (isSlidingRef.current) return false;
+                        if (isSlidingRef.current || isOverlayOpenRef.current) return false;
                         return gs.dy > 8 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.15;
                     },
                     onPanResponderMove: (_, gs) => {
@@ -409,7 +471,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                 transparent
                 animationType="none"
                 statusBarTranslucent
-                onRequestClose={animateClose}
+                onRequestClose={handleHardwareBack}
             >
                 <View style={styles.modalRoot}>
                     <Animated.View style={[styles.dimBg, { opacity: backdropOpacity }]} />
@@ -752,9 +814,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 onClose={() => setLyricsSheetOpen(false)}
                                 onOpenEditLyrics={() => {
                                     setLyricsSheetOpen(false);
-                                    setTimeout(() => {
-                                        setLyricsEditorOpen(true);
-                                    }, 220);
+                                    setLyricsEditorOpen(true);
                                 }}
                                 onOpenShareLyrics={(lineIdx = 0) => {
                                     setLyricsSheetOpen(false);
@@ -770,45 +830,6 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             />
                         )}
 
-                        {/* Modal de edición/búsqueda/importación de letras (botón Letras sin letra o lápiz en vista de letras) */}
-                        <LyricsEditorModal
-                            visible={lyricsEditorOpen}
-                            track={currentTrack}
-                            initialLyricsText={parsedLyrics?.rawText ?? ''}
-                            saveDirectly
-                            onClose={() => setLyricsEditorOpen(false)}
-                            onSaved={(rawText) => {
-                                const nextParsed =
-                                    rawText && rawText.trim().length > 0
-                                        ? parseLyricsText(rawText)
-                                        : null;
-                                const validParsed =
-                                    nextParsed && nextParsed.lines.length > 0 ? nextParsed : null;
-                                setParsedLyrics(validParsed);
-                                updateCurrentTrack({ hasLyrics: Boolean(validParsed) });
-                                onTrackMutated?.();
-                            }}
-                        />
-
-                        {/* Carta editable estilo SongCard (carátula 1:1, título, artista y letras) */}
-                        <EditTrackModal
-                            visible={editTrackOpen}
-                            track={currentTrack}
-                            initialLyrics={parsedLyrics}
-                            onClose={() => setEditTrackOpen(false)}
-                            onSaved={(edited) => {
-                                setParsedLyrics(edited.parsedLyrics);
-                                updateCurrentTrack({
-                                    title: edited.title,
-                                    artist: edited.artist,
-                                    artworkUri: edited.artworkUri,
-                                    dominantColor: edited.dominantColor,
-                                    hasLyrics: edited.hasLyrics,
-                                });
-                                onTrackMutated?.();
-                            }}
-                        />
-
                         {/* Constructor y compartidor de tarjetas (Canción y Letra) con marca Snow Beats */}
                         <ShareCardModal
                             visible={shareModalState.open}
@@ -820,6 +841,45 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             onClose={() => setShareModalState((prev) => ({ ...prev, open: false }))}
                         />
                     </Animated.View>
+
+                    {/* Overlays montados fuera del PanResponder y sin Modal nativo anidado (evita cierres/bloqueos en Android) */}
+                    <EditTrackModal
+                        visible={editTrackOpen}
+                        track={currentTrack}
+                        initialLyrics={parsedLyrics}
+                        backHandlerRef={editTrackBackRef}
+                        onClose={() => setEditTrackOpen(false)}
+                        onSaved={(edited) => {
+                            setParsedLyrics(edited.parsedLyrics);
+                            updateCurrentTrack({
+                                title: edited.title,
+                                artist: edited.artist,
+                                artworkUri: edited.artworkUri,
+                                dominantColor: edited.dominantColor,
+                                hasLyrics: edited.hasLyrics,
+                            });
+                            onTrackMutated?.();
+                        }}
+                    />
+
+                    <LyricsEditorModal
+                        visible={lyricsEditorOpen}
+                        track={currentTrack}
+                        initialLyricsText={parsedLyrics?.rawText ?? ''}
+                        saveDirectly
+                        onClose={() => setLyricsEditorOpen(false)}
+                        onSaved={(rawText) => {
+                            const nextParsed =
+                                rawText && rawText.trim().length > 0
+                                    ? parseLyricsText(rawText)
+                                    : null;
+                            const validParsed =
+                                nextParsed && nextParsed.lines.length > 0 ? nextParsed : null;
+                            setParsedLyrics(validParsed);
+                            updateCurrentTrack({ hasLyrics: Boolean(validParsed) });
+                            onTrackMutated?.();
+                        }}
+                    />
                 </View>
             </Modal>
         );
