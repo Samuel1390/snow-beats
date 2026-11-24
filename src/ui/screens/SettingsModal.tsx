@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Animated,
+    Easing,
     Image,
     KeyboardAvoidingView,
     Linking,
@@ -11,6 +13,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -59,9 +62,52 @@ interface SettingsModalProps {
     onClose: () => void;
 }
 
+function escapeHtml(raw: string): string {
+    return raw
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function buildBugReportHtml(description: string, imageCount: number): string {
+    const safeBody = escapeHtml(description).replace(/\n/g, '<br/>');
+    const osInfo = `${Platform.OS === 'android' ? 'Android' : Platform.OS} ${String(Platform.Version)}`;
+    const dateStr = new Date().toLocaleString('es-ES');
+    const attachText =
+        imageCount > 0
+            ? `${imageCount} ${imageCount === 1 ? 'imagen adjunta' : 'imágenes adjuntas'}`
+            : 'Sin imágenes adjuntas';
+
+    return `<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #111827; line-height: 1.5; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 0 auto; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden;">
+    <div style="background-color: #0F172A; color: #FFFFFF; padding: 18px 22px;">
+      <h2 style="margin: 0; font-size: 19px; letter-spacing: 0.2px;">Snow Beats — Reporte de problema</h2>
+      <p style="margin: 4px 0 0 0; font-size: 12px; color: #93C5FD;">Enviado desde la aplicación móvil</p>
+    </div>
+    <div style="padding: 20px 22px; background-color: #FFFFFF;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; color: #1E3A8A; text-transform: uppercase;">Descripción del fallo</h3>
+      <div style="background-color: #F8FAFC; border-left: 4px solid #1E3A8A; padding: 12px 14px; border-radius: 6px; font-size: 14px; color: #111827;">
+        ${safeBody}
+      </div>
+      <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0;" />
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Aplicación:</b> Snow Beats v0.1.0</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Sistema:</b> ${escapeHtml(osInfo)}</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Adjuntos:</b> ${escapeHtml(attachText)}</p>
+      <p style="margin: 0; font-size: 13px; color: #374151;"><b>Fecha:</b> ${escapeHtml(dateStr)}</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible, onClose }) => {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const { width: screenWidth } = useWindowDimensions();
     const [activeSection, setActiveSection] = useState<SettingsSection | null>(null);
     const [language, setLanguage] = useState<'es' | 'en'>('es');
     const [sleepMinutes, setSleepMinutes] = useState<number>(0);
@@ -73,6 +119,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     const [savedAudioPath, setSavedAudioPath] = useState(DEFAULT_AUDIO_DOWNLOAD_PATH);
     const [savedVideoPath, setSavedVideoPath] = useState(DEFAULT_VIDEO_DOWNLOAD_PATH);
 
+    // Progreso de transición horizontal: 0 = menú principal, 1 = subsección visible
+    const sectionAnim = useRef(new Animated.Value(0)).current;
+    const isClosingSectionRef = useRef(false);
+
     // Solo habilita "Guardar rutas" cuando alguna de las dos rutas cambió realmente
     const hasUnsavedPathChanges =
         audioDownloadPath.trim() !== savedAudioPath.trim() ||
@@ -80,6 +130,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
 
     useEffect(() => {
         if (visible) {
+            isClosingSectionRef.current = false;
+            sectionAnim.setValue(0);
             setActiveSection(null);
             getDeletedTracks()
                 .then(setTrash)
@@ -93,15 +145,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                 })
                 .catch(() => { });
         }
-    }, [visible]);
+    }, [visible, sectionAnim]);
 
-    const handleBackAction = () => {
+    // Abre una subsección deslizándola suavemente desde la derecha hacia la izquierda
+    const openSection = useCallback(
+        (section: SettingsSection) => {
+            isClosingSectionRef.current = false;
+            setActiveSection(section);
+            sectionAnim.stopAnimation();
+            sectionAnim.setValue(0);
+            Animated.timing(sectionAnim, {
+                toValue: 1,
+                duration: 260,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+            }).start();
+        },
+        [sectionAnim]
+    );
+
+    // Cierra la subsección actual deslizándola hacia la derecha antes de desmontarla
+    const closeSection = useCallback(() => {
+        if (activeSection === null || isClosingSectionRef.current) return;
+        isClosingSectionRef.current = true;
+        sectionAnim.stopAnimation();
+        Animated.timing(sectionAnim, {
+            toValue: 0,
+            duration: 220,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: true,
+        }).start(({ finished }) => {
+            isClosingSectionRef.current = false;
+            if (finished) {
+                setActiveSection(null);
+            }
+        });
+    }, [activeSection, sectionAnim]);
+
+    const handleBackAction = useCallback(() => {
         if (activeSection !== null) {
-            setActiveSection(null);
+            closeSection();
         } else {
             onClose();
         }
-    };
+    }, [activeSection, closeSection, onClose]);
 
     // Permite adjuntar opcionalmente hasta 5 capturas de pantalla para explicar un problema
     const handlePickReportImages = async () => {
@@ -131,22 +218,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     };
 
     const sendBugReport = async () => {
+        const description = bugReport.trim() || 'Sin descripción adicional.';
         const subject = 'Snow Beats - Reporte de problema';
-        const body = bugReport.trim() || 'Describe el error aquí...';
+        const plainBody = [
+            'SNOW BEATS — REPORTE DE PROBLEMA',
+            '----------------------------------',
+            description,
+            '',
+            `Aplicación: Snow Beats v0.1.0`,
+            `Sistema: ${Platform.OS} ${String(Platform.Version)}`,
+            `Imágenes adjuntas: ${reportImages.length}`,
+        ].join('\n');
+        const htmlBody = buildBugReportHtml(description, reportImages.length);
 
         if (Platform.OS === 'android') {
             const launched = await sendEmailWithAttachments(
                 'snelo1390@gmail.com',
                 subject,
-                body,
+                plainBody,
+                htmlBody,
                 reportImages
             );
             if (launched) return;
+            Alert.alert(
+                'Correo no disponible',
+                'No se encontró una aplicación de correo instalada para enviar el reporte a snelo1390@gmail.com.'
+            );
+            return;
         }
 
         const mailUrl = `mailto:snelo1390@gmail.com?subject=${encodeURIComponent(
             subject
-        )}&body=${encodeURIComponent(body)}`;
+        )}&body=${encodeURIComponent(plainBody)}`;
         Linking.openURL(mailUrl);
     };
 
@@ -247,73 +350,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
 
     const renderSubHeader = (title: string) => (
         <View style={styles.header}>
-            <TouchableOpacity onPress={() => setActiveSection(null)} style={styles.backBtn}>
+            <TouchableOpacity onPress={closeSection} style={styles.backBtn}>
                 <ArrowLeft size={22} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{title}</Text>
         </View>
     );
 
-    return (
-        <Modal
-            visible={visible}
-            animationType="slide"
-            statusBarTranslucent
-            onRequestClose={handleBackAction}
-        >
-            <View
-                style={[
-                    styles.container,
-                    {
-                        paddingTop: Math.max(insets.top, 26) + 6,
-                        paddingBottom: Math.max(insets.bottom, 10),
-                    },
-                ]}
-            >
-                {/* Pantalla dedicada de Tema */}
-                {activeSection === 'theme' ? (
-                    <ThemeSettingsView onBack={() => setActiveSection(null)} />
-                ) : activeSection === null ? (
-                    /* Menú principal limpio listado por categorías */
-                    <>
-                        <View style={styles.header}>
-                            <TouchableOpacity onPress={onClose} style={styles.backBtn}>
-                                <ArrowLeft size={22} color="#FFFFFF" />
-                            </TouchableOpacity>
-                            <Text style={styles.headerTitle}>Configuración</Text>
-                        </View>
+    const safeWidth = Math.max(screenWidth, 320);
+    const menuTranslateX = sectionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, -safeWidth * 0.22],
+    });
+    const menuOpacity = sectionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.55],
+    });
+    const detailTranslateX = sectionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [safeWidth, 0],
+    });
 
-                        <ScrollView
-                            contentContainerStyle={styles.menuListContent}
-                            showsVerticalScrollIndicator={false}
-                        >
-                            {menuItems.map(({ key, title, subtitle, Icon, iconBg }) => (
-                                <TouchableOpacity
-                                    key={key}
-                                    style={styles.menuRow}
-                                    activeOpacity={0.75}
-                                    onPress={() => setActiveSection(key)}
-                                >
-                                    <View style={[styles.menuIconWrap, { backgroundColor: iconBg }]}>
-                                        <Icon size={20} color="#FFFFFF" />
-                                    </View>
-                                    <View style={styles.menuTextCol}>
-                                        <Text style={styles.menuTitle}>{title}</Text>
-                                        <Text style={styles.menuSubtitle} numberOfLines={1}>
-                                            {subtitle}
-                                        </Text>
-                                    </View>
-                                    <ChevronRight size={20} color="#71717A" />
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </>
-                ) : activeSection === 'download_paths' ? (
-                    <KeyboardAvoidingView
-                        style={{ flex: 1 }}
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    >
-                        {renderSubHeader('Ruta de descarga')}
+    const renderActiveSectionContent = () => {
+        if (activeSection === 'theme') {
+            return <ThemeSettingsView onBack={closeSection} />;
+        }
+        if (activeSection === 'download_paths') {
+            return (
+                <KeyboardAvoidingView
+                    style={{ flex: 1 }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    {renderSubHeader('Ruta de descarga')}
                         <ScrollView
                             contentContainerStyle={styles.subContent}
                             keyboardShouldPersistTaps="handled"
@@ -376,11 +444,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                 <RotateCcw size={16} color="#E4E4E7" />
                                 <Text style={styles.secondaryBtnText}>Restaurar rutas predeterminadas</Text>
                             </TouchableOpacity>
-                        </ScrollView>
-                    </KeyboardAvoidingView>
-                ) : activeSection === 'timer' ? (
-                    <>
-                        {renderSubHeader('Temporizador de apagado')}
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            );
+        }
+        if (activeSection === 'timer') {
+            return (
+                <>
+                    {renderSubHeader('Temporizador de apagado')}
                         <ScrollView contentContainerStyle={styles.subContent}>
                             <Text style={styles.subDescription}>
                                 Detiene la reproducción automáticamente al finalizar el tiempo seleccionado.
@@ -400,11 +471,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                     </TouchableOpacity>
                                 );
                             })}
-                        </ScrollView>
-                    </>
-                ) : activeSection === 'stats' ? (
-                    <>
-                        {renderSubHeader('Estadísticas y Alarma')}
+                    </ScrollView>
+                </>
+            );
+        }
+        if (activeSection === 'stats') {
+            return (
+                <>
+                    {renderSubHeader('Estadísticas y Alarma')}
                         <ScrollView contentContainerStyle={styles.subContent}>
                             <View style={styles.infoCard}>
                                 <Text style={styles.infoCardTitle}>Tiempo total reproducido</Text>
@@ -418,11 +492,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                     Módulo nativo de alarma programada planificado para la siguiente fase.
                                 </Text>
                             </View>
-                        </ScrollView>
-                    </>
-                ) : activeSection === 'trash' ? (
-                    <>
-                        {renderSubHeader(`Eliminados recientemente (${trash.length})`)}
+                    </ScrollView>
+                </>
+            );
+        }
+        if (activeSection === 'trash') {
+            return (
+                <>
+                    {renderSubHeader(`Eliminados recientemente (${trash.length})`)}
                         <ScrollView contentContainerStyle={styles.subContent}>
                             {trash.length > 0 ? (
                                 <TouchableOpacity
@@ -465,11 +542,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                     </TouchableOpacity>
                                 </View>
                             ))}
-                        </ScrollView>
-                    </>
-                ) : activeSection === 'language' ? (
-                    <>
-                        {renderSubHeader('Idioma')}
+                    </ScrollView>
+                </>
+            );
+        }
+        if (activeSection === 'language') {
+            return (
+                <>
+                    {renderSubHeader('Idioma')}
                         <ScrollView contentContainerStyle={styles.subContent}>
                             {(
                                 [
@@ -489,14 +569,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                     </TouchableOpacity>
                                 );
                             })}
-                        </ScrollView>
-                    </>
-                ) : activeSection === 'report' ? (
-                    <KeyboardAvoidingView
-                        style={{ flex: 1 }}
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    >
-                        {renderSubHeader('Reportar problema')}
+                    </ScrollView>
+                </>
+            );
+        }
+        if (activeSection === 'report') {
+            return (
+                <KeyboardAvoidingView
+                    style={{ flex: 1 }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    {renderSubHeader('Reportar problema')}
                         <ScrollView
                             contentContainerStyle={styles.subContent}
                             keyboardShouldPersistTaps="handled"
@@ -568,21 +651,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                                         : 'Enviar reporte por correo'}
                                 </Text>
                             </TouchableOpacity>
-                        </ScrollView>
-                    </KeyboardAvoidingView>
-                ) : (
-                    <>
-                        {renderSubHeader('Acerca de')}
-                        <ScrollView contentContainerStyle={styles.subContent}>
-                            <View style={styles.infoCard}>
-                                <Text style={styles.infoCardTitle}>Snow Beats</Text>
-                                <Text style={styles.infoCardBody}>
-                                    Versión 0.1.0 · Reproductor de música local diseñado para alto rendimiento,
-                                    privacidad total sin servidor y personalización visual.
-                                </Text>
-                            </View>
-                        </ScrollView>
-                    </>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            );
+        }
+        return (
+            <>
+                {renderSubHeader('Acerca de')}
+                <ScrollView contentContainerStyle={styles.subContent}>
+                    <View style={styles.infoCard}>
+                        <Text style={styles.infoCardTitle}>Snow Beats</Text>
+                        <Text style={styles.infoCardBody}>
+                            Versión 0.1.0 · Reproductor de música local diseñado para alto rendimiento,
+                            privacidad total sin servidor y personalización visual.
+                        </Text>
+                    </View>
+                </ScrollView>
+            </>
+        );
+    };
+
+    const topInset = Math.max(insets.top, 26) + 6;
+    const bottomInset = Math.max(insets.bottom, 10);
+
+    return (
+        <Modal
+            visible={visible}
+            animationType="slide"
+            statusBarTranslucent
+            onRequestClose={handleBackAction}
+        >
+            <View style={styles.container}>
+                {/* Menú principal con efecto sutil de desplazamiento al entrar en una subsección */}
+                <Animated.View
+                    style={[
+                        styles.screenLayer,
+                        {
+                            paddingTop: topInset,
+                            paddingBottom: bottomInset,
+                            opacity: menuOpacity,
+                            transform: [{ translateX: menuTranslateX }],
+                        },
+                    ]}
+                    pointerEvents={activeSection !== null ? 'none' : 'auto'}
+                >
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={onClose} style={styles.backBtn}>
+                            <ArrowLeft size={22} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>Configuración</Text>
+                    </View>
+
+                    <ScrollView
+                        contentContainerStyle={styles.menuListContent}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {menuItems.map(({ key, title, subtitle, Icon, iconBg }) => (
+                            <TouchableOpacity
+                                key={key}
+                                style={styles.menuRow}
+                                activeOpacity={0.75}
+                                onPress={() => openSection(key)}
+                            >
+                                <View style={[styles.menuIconWrap, { backgroundColor: iconBg }]}>
+                                    <Icon size={20} color="#FFFFFF" />
+                                </View>
+                                <View style={styles.menuTextCol}>
+                                    <Text style={styles.menuTitle}>{title}</Text>
+                                    <Text style={styles.menuSubtitle} numberOfLines={1}>
+                                        {subtitle}
+                                    </Text>
+                                </View>
+                                <ChevronRight size={20} color="#71717A" />
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </Animated.View>
+
+                {/* Subsección activa deslizándose desde la derecha al entrar y hacia la derecha al salir */}
+                {activeSection !== null && (
+                    <Animated.View
+                        style={[
+                            styles.detailOverlay,
+                            {
+                                paddingTop: topInset,
+                                paddingBottom: bottomInset,
+                                transform: [{ translateX: detailTranslateX }],
+                            },
+                        ]}
+                    >
+                        {renderActiveSectionContent()}
+                    </Animated.View>
                 )}
             </View>
         </Modal>
@@ -593,6 +752,19 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#0C0E14',
+        overflow: 'hidden',
+    },
+    screenLayer: {
+        flex: 1,
+    },
+    detailOverlay: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        backgroundColor: '#0C0E14',
+        elevation: 8,
     },
     header: {
         flexDirection: 'row',

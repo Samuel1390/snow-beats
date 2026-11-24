@@ -9,22 +9,25 @@ import {
     Image,
     StyleSheet,
     Platform,
+    RefreshControl,
 } from 'react-native';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { Film, X, LayoutGrid, List } from 'lucide-react-native';
+import { Film, X, LayoutGrid, List, Maximize2, Minimize2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeContext';
 import { usePlayer } from '../../audio-engine/PlayerContext';
+import { setScreenOrientation } from '../../../modules/snow-metadata';
 
 const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.memo(
     ({ uri, onClose }) => {
         const insets = useSafeAreaInsets();
         const [ready, setReady] = useState(false);
+        const [isLandscape, setIsLandscape] = useState(false);
         const player = useVideoPlayer(uri);
 
-        // Inicia la reproducción en el siguiente frame para evitar congelar la apertura del Modal
+        // Inicia la reproducción en el siguiente frame y asegura restaurar orientación vertical al salir
         useEffect(() => {
             const raf = requestAnimationFrame(() => {
                 try {
@@ -36,19 +39,62 @@ const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.m
                 try {
                     player.pause();
                 } catch { }
+                if (Platform.OS === 'android') {
+                    setScreenOrientation('portrait').catch(() => { });
+                }
             };
         }, [player]);
 
+        const handleClose = useCallback(() => {
+            if (Platform.OS === 'android') {
+                setScreenOrientation('portrait').catch(() => { });
+            }
+            setIsLandscape(false);
+            onClose();
+        }, [onClose]);
+
+        // Alterna manualmente entre vertical y pantalla completa horizontal para cualquier video
+        const handleToggleLandscape = useCallback(() => {
+            setIsLandscape((prev) => {
+                const next = !prev;
+                if (Platform.OS === 'android') {
+                    setScreenOrientation(next ? 'landscape' : 'portrait').catch(() => { });
+                }
+                return next;
+            });
+        }, []);
+
+        const topOffset = isLandscape ? 14 : Math.max(insets.top, 24) + 12;
+
         return (
-            <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+            <Modal
+                visible
+                animationType="fade"
+                statusBarTranslucent
+                supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+                onRequestClose={handleClose}
+            >
                 <View style={styles.modalBg}>
-                    <TouchableOpacity
-                        style={[styles.closeBtn, { top: Math.max(insets.top, 24) + 12 }]}
-                        onPress={onClose}
-                        activeOpacity={0.8}
-                    >
-                        <X size={24} color="#FFFFFF" />
-                    </TouchableOpacity>
+                    <View style={[styles.topControlsRow, { top: topOffset }]}>
+                        <TouchableOpacity
+                            style={styles.controlCircleBtn}
+                            onPress={handleToggleLandscape}
+                            activeOpacity={0.8}
+                        >
+                            {isLandscape ? (
+                                <Minimize2 size={20} color="#FFFFFF" />
+                            ) : (
+                                <Maximize2 size={20} color="#FFFFFF" />
+                            )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.controlCircleBtn}
+                            onPress={handleClose}
+                            activeOpacity={0.8}
+                        >
+                            <X size={22} color="#FFFFFF" />
+                        </TouchableOpacity>
+                    </View>
 
                     {!ready && (
                         <View style={styles.loaderOverlay} pointerEvents="none">
@@ -61,6 +107,19 @@ const VideoModalPlayer: React.FC<{ uri: string; onClose: () => void }> = React.m
                         style={styles.video}
                         contentFit="contain"
                         nativeControls
+                        fullscreenOptions={{ enable: true, orientation: 'landscape' }}
+                        onFullscreenEnter={() => {
+                            setIsLandscape(true);
+                            if (Platform.OS === 'android') {
+                                setScreenOrientation('landscape').catch(() => { });
+                            }
+                        }}
+                        onFullscreenExit={() => {
+                            setIsLandscape(false);
+                            if (Platform.OS === 'android') {
+                                setScreenOrientation('portrait').catch(() => { });
+                            }
+                        }}
                         onFirstFrameRender={() => setReady(true)}
                     />
                 </View>
@@ -109,15 +168,22 @@ const VideoItemCard: React.FC<{
     )
 );
 
-export const VideosTab: React.FC = React.memo(() => {
+interface VideosTabProps {
+    refreshSignal?: number;
+}
+
+export const VideosTab: React.FC<VideosTabProps> = React.memo(({ refreshSignal = 0 }) => {
     const { fgColor, mutedColor } = useTheme();
     const { pausePlayback } = usePlayer();
     const [videos, setVideos] = useState<MediaLibrary.Asset[]>([]);
     const [thumbs, setThumbs] = useState<Record<string, string>>({});
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid'); // Cuadrícula por defecto
     const [selectedUri, setSelectedUri] = useState<string | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
 
     const mountedRef = useRef(true);
+    const videosRef = useRef<MediaLibrary.Asset[]>(videos);
+    videosRef.current = videos;
     const pausedThumbsRef = useRef(false);
     const requestedIdsRef = useRef<Set<string>>(new Set());
     const queueRef = useRef<MediaLibrary.Asset[]>([]);
@@ -179,25 +245,75 @@ export const VideosTab: React.FC = React.memo(() => {
         [processThumbQueue]
     );
 
+    // Escaneo incremental de videos locales: mantiene los existentes y agrega solo los faltantes (.mp4 / video)
+    const scanVideosIncremental = useCallback(
+        async (showSpinner: boolean) => {
+            if (Platform.OS === 'web') return;
+            if (showSpinner) setRefreshing(true);
+            try {
+                const perm = await MediaLibrary.requestPermissionsAsync(false, ['video']);
+                if (!perm.granted || !mountedRef.current) return;
+
+                const existingIds = new Set(videosRef.current.map((v) => v.id));
+                const existingUris = new Set(videosRef.current.map((v) => v.uri));
+                const newlyFound: MediaLibrary.Asset[] = [];
+
+                let hasNextPage = true;
+                let after: string | undefined = undefined;
+                while (hasNextPage && mountedRef.current) {
+                    const page = await MediaLibrary.getAssetsAsync({
+                        mediaType: 'video',
+                        first: 200,
+                        after,
+                        sortBy: [MediaLibrary.SortBy.creationTime],
+                    });
+                    for (const asset of page.assets) {
+                        if (!existingIds.has(asset.id) && !existingUris.has(asset.uri)) {
+                            existingIds.add(asset.id);
+                            existingUris.add(asset.uri);
+                            newlyFound.push(asset);
+                        }
+                    }
+                    if (!page.hasNextPage || page.assets.length === 0 || page.endCursor === after) {
+                        hasNextPage = false;
+                    } else {
+                        after = page.endCursor;
+                    }
+                }
+
+                if (!mountedRef.current) return;
+                if (newlyFound.length > 0) {
+                    setVideos((prev) => [...newlyFound, ...prev]);
+                    enqueueThumbnails(newlyFound.slice(0, 8));
+                }
+            } catch {
+            } finally {
+                if (showSpinner && mountedRef.current) {
+                    setRefreshing(false);
+                }
+            }
+        },
+        [enqueueThumbnails]
+    );
+
     useEffect(() => {
         mountedRef.current = true;
-        if (Platform.OS === 'web') return;
-
-        MediaLibrary.requestPermissionsAsync(false, ['video'])
-            .then(async (res) => {
-                if (!res.granted || !mountedRef.current) return;
-                const page = await MediaLibrary.getAssetsAsync({ mediaType: 'video', first: 100 });
-                if (!mountedRef.current) return;
-                setVideos(page.assets);
-                // Solo decodifica inicialmente las primeras 8 miniaturas visibles
-                enqueueThumbnails(page.assets.slice(0, 8));
-            })
-            .catch(() => { });
-
+        scanVideosIncremental(false);
         return () => {
             mountedRef.current = false;
         };
-    }, [enqueueThumbnails]);
+    }, [scanVideosIncremental]);
+
+    // Cuando termina la descarga de un video en Descargas, agrega solo el video faltante sin reiniciar la vista
+    useEffect(() => {
+        if (refreshSignal > 0) {
+            scanVideosIncremental(false);
+        }
+    }, [refreshSignal, scanVideosIncremental]);
+
+    const handlePullRefresh = useCallback(() => {
+        scanVideosIncremental(true);
+    }, [scanVideosIncremental]);
 
     const handleOpenVideo = useCallback(
         (uri: string) => {
@@ -275,8 +391,17 @@ export const VideosTab: React.FC = React.memo(() => {
                 windowSize={5}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
-                contentContainerStyle={{ padding: 12 }}
+                contentContainerStyle={{ padding: 12, flexGrow: 1 }}
                 columnWrapperStyle={viewMode === 'grid' ? { gap: 10 } : undefined}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handlePullRefresh}
+                        colors={['#38BDF8', '#1E3A8A']}
+                        tintColor="#38BDF8"
+                        progressBackgroundColor="#111827"
+                    />
+                }
                 renderItem={renderItem}
                 ListEmptyComponent={
                     <Text style={{ color: mutedColor, textAlign: 'center', marginTop: 32 }}>
@@ -327,14 +452,19 @@ const styles = StyleSheet.create({
     fill: { width: '100%', height: '100%' },
     name: { fontSize: 13, fontWeight: '600' },
     modalBg: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' },
-    closeBtn: {
+    topControlsRow: {
         position: 'absolute',
         right: 16,
         zIndex: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    controlCircleBtn: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: 'rgba(0,0,0,0.58)',
         justifyContent: 'center',
         alignItems: 'center',
     },

@@ -45,6 +45,28 @@ module.exports = function withSnowBeatsAndroid(config) {
             }
             app.$['tools:replace'] = currentReplace.join(',');
         }
+
+        // Permite consultar clientes de correo en Android 11+ para otorgar permisos FileProvider solo a apps de email
+        if (!Array.isArray(manifest.queries)) {
+            manifest.queries = [{}];
+        }
+        if (!manifest.queries[0]) {
+            manifest.queries[0] = {};
+        }
+        if (!Array.isArray(manifest.queries[0].intent)) {
+            manifest.queries[0].intent = [];
+        }
+        const hasMailtoQuery = manifest.queries[0].intent.some(
+            (item) =>
+                item?.action?.[0]?.$?.['android:name'] === 'android.intent.action.SENDTO' &&
+                item?.data?.[0]?.$?.['android:scheme'] === 'mailto'
+        );
+        if (!hasMailtoQuery) {
+            manifest.queries[0].intent.push({
+                action: [{ $: { 'android:name': 'android.intent.action.SENDTO' } }],
+                data: [{ $: { 'android:scheme': 'mailto' } }],
+            });
+        }
         return mod;
     });
 

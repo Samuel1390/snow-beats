@@ -142,9 +142,11 @@ interface SnowMetadataNativeModule {
     sendEmailWithAttachments?: (
         to: string,
         subject: string,
-        body: string,
+        plainBody: string,
+        htmlBody: string,
         imageUris: string[]
     ) => Promise<boolean>;
+    setScreenOrientation?: (mode: 'portrait' | 'landscape' | 'unspecified') => Promise<boolean>;
     hasStorageWritePermission?: () => Promise<boolean>;
     requestStorageWritePermission?: () => Promise<boolean>;
     extractMediaInfo?: (url: string) => Promise<ExtractedMediaInfo>;
@@ -226,17 +228,28 @@ export function addMediaActionListener(
     return SnowMetadata.addListener('onMediaAction', listener);
 }
 
-// Envía correo nativo con hasta 5 imágenes adjuntas vía FileProvider
+// Envía correo nativo (solo apps de email) con cuerpo HTML y hasta 5 imágenes adjuntas vía FileProvider
 export async function sendEmailWithAttachments(
     to: string,
     subject: string,
-    body: string,
+    plainBody: string,
+    htmlBody: string,
     imageUris: string[]
 ): Promise<boolean> {
     if (!SnowMetadata || typeof SnowMetadata.sendEmailWithAttachments !== 'function') {
         return false;
     }
-    return SnowMetadata.sendEmailWithAttachments(to, subject, body, imageUris);
+    return SnowMetadata.sendEmailWithAttachments(to, subject, plainBody, htmlBody, imageUris);
+}
+
+// Rota la orientación de pantalla en Android y oculta/restaura barras del sistema en modo horizontal
+export async function setScreenOrientation(
+    mode: 'portrait' | 'landscape' | 'unspecified'
+): Promise<boolean> {
+    if (!SnowMetadata || typeof SnowMetadata.setScreenOrientation !== 'function') {
+        return false;
+    }
+    return SnowMetadata.setScreenOrientation(mode);
 }
 
 // Verifica si Android tiene concedido el permiso de escritura de almacenamiento

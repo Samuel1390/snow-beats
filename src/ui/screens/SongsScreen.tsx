@@ -12,6 +12,7 @@ import {
     Alert,
     BackHandler,
     Platform,
+    RefreshControl,
     useWindowDimensions,
     NativeSyntheticEvent,
     NativeScrollEvent,
@@ -20,12 +21,16 @@ import * as Sharing from 'expo-sharing';
 import { ArtistsTab } from './ArtistTab';
 import { AlbumsTab } from './AlbumsTab';
 import { VideosTab } from './VideosTab';
-import { DownloadsTab } from './DownloadsTab';
+import { CompletedDownloadInfo, DownloadsTab } from './DownloadsTab';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, ArrowUpDown, Settings } from 'lucide-react-native';
 import { MainTab, SortOption, Track } from '../../types/music';
 import { requestAudioPermission } from '../../permissions/audioPermissions';
-import { scanLocalAudioLibrary } from '../../storage/scanner/mediaScanner';
+import {
+    scanLocalAudioLibrary,
+    scanMissingAudioTracks,
+    upsertSingleDownloadedAudio,
+} from '../../storage/scanner/mediaScanner';
 import { AlphabetIndex } from '../components/AlphabetIndex';
 import { getVisibleTracks, softDeleteTracks, updateTrackMetadata } from '../../storage/database/db';
 import { SONG_CARD_HEIGHT, SongCard } from '../components/SongCard';
@@ -57,10 +62,39 @@ const TABS: { key: MainTab; label: string }[] = [
 const DEFAULT_TAB_INDEX = 1;
 const INDICATOR_BASE_WIDTH = 100;
 
+// Ordena la lista en memoria replicando el criterio activo de SQLite sin recargar toda la pantalla
+function sortTracksInMemory(list: Track[], sortBy: SortOption): Track[] {
+    const copy = [...list];
+    switch (sortBy) {
+        case 'date_desc':
+            return copy.sort((a, b) => b.creationTime - a.creationTime);
+        case 'most_played':
+            return copy.sort((a, b) => b.playCount - a.playCount || a.title.localeCompare(b.title));
+        case 'title_asc':
+            return copy.sort((a, b) => a.title.localeCompare(b.title));
+        case 'title_desc':
+            return copy.sort((a, b) => b.title.localeCompare(a.title));
+        case 'artist_asc':
+            return copy.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
+        case 'artist_desc':
+            return copy.sort((a, b) => b.artist.localeCompare(a.artist) || a.title.localeCompare(b.title));
+        case 'duration_asc':
+            return copy.sort((a, b) => a.duration - b.duration);
+        case 'duration_desc':
+            return copy.sort((a, b) => b.duration - a.duration);
+        default:
+            return copy;
+    }
+}
+
 interface SongsListPaneProps {
     tracks: Track[];
     sortBy: SortOption;
     selectedIds: string[];
+    currentTrackId: string | null;
+    isPlaying: boolean;
+    refreshing: boolean;
+    onRefresh: () => void;
     mutedColor: string;
     onToggleSelect: (id: string) => void;
     onClearSelect: () => void;
@@ -79,6 +113,10 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
         tracks,
         sortBy,
         selectedIds,
+        currentTrackId,
+        isPlaying,
+        refreshing,
+        onRefresh,
         mutedColor,
         onToggleSelect,
         onClearSelect,
@@ -94,6 +132,10 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
         const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
         const hasSelectionRef = useRef(selectedIds.length > 0);
         hasSelectionRef.current = selectedIds.length > 0;
+        const extraData = useMemo(
+            () => ({ selectedSet, currentTrackId, isPlaying }),
+            [selectedSet, currentTrackId, isPlaying]
+        );
 
         // Callbacks estables para que React.memo en SongCard evite re-renderizar filas intactas
         const handlePress = useCallback(
@@ -115,16 +157,21 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
         );
 
         const renderItem = useCallback(
-            ({ item }: { item: Track }) => (
-                <SongCard
-                    track={item}
-                    selected={selectedSet.has(item.id)}
-                    onPress={handlePress}
-                    onLongPress={handleSelectCard}
-                    onArtworkPress={handleSelectCard}
-                />
-            ),
-            [selectedSet, handlePress, handleSelectCard]
+            ({ item }: { item: Track }) => {
+                const isCurrent = currentTrackId === item.id;
+                return (
+                    <SongCard
+                        track={item}
+                        selected={selectedSet.has(item.id)}
+                        isCurrentTrack={isCurrent}
+                        isPlaying={isCurrent && isPlaying}
+                        onPress={handlePress}
+                        onLongPress={handleSelectCard}
+                        onArtworkPress={handleSelectCard}
+                    />
+                );
+            },
+            [selectedSet, currentTrackId, isPlaying, handlePress, handleSelectCard]
         );
 
         const getItemLayout = useCallback(
@@ -165,11 +212,21 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
                     ref={listRef}
                     data={tracks}
                     keyExtractor={(item) => item.id}
-                    extraData={selectedSet}
+                    extraData={extraData}
                     getItemLayout={getItemLayout}
                     initialNumToRender={16}
                     maxToRenderPerBatch={12}
                     windowSize={7}
+                    contentContainerStyle={tracks.length === 0 ? { flexGrow: 1 } : undefined}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            colors={['#38BDF8', '#1E3A8A']}
+                            tintColor="#38BDF8"
+                            progressBackgroundColor="#111827"
+                        />
+                    }
                     renderItem={renderItem}
                     ListEmptyComponent={
                         <View style={styles.centered}>
@@ -210,8 +267,10 @@ export const SongsScreen: React.FC = () => {
     const [tracks, setTracks] = useState<Track[]>([]);
     const [sortBy, setSortBy] = useState<SortOption>('date_desc');
     const [loading, setLoading] = useState<boolean>(true);
+    const [refreshingLibrary, setRefreshingLibrary] = useState<boolean>(false);
     const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
     const [libraryVersion, setLibraryVersion] = useState<number>(0);
+    const [videoRefreshSignal, setVideoRefreshSignal] = useState<number>(0);
 
     const { fgColor, mutedColor } = useTheme();
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -220,11 +279,12 @@ export const SongsScreen: React.FC = () => {
     const [sortOpen, setSortOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
-    const { playTrack, addToQueue } = usePlayer();
+    const { currentTrack, isPlaying, playTrack, addToQueue } = usePlayer();
     const [playerOpen, setPlayerOpen] = useState(false);
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+    const refreshingRef = useRef<boolean>(false);
 
     const tracksRef = useRef<Track[]>(tracks);
     tracksRef.current = tracks;
@@ -349,6 +409,107 @@ export const SongsScreen: React.FC = () => {
     useEffect(() => {
         loadLibrary(sortBy);
     }, [loadLibrary, sortBy]);
+
+    // Inserta únicamente la canción recién descargada sin recargar toda la lista ni mostrar pantalla de carga
+    const handleDownloadCompleted = useCallback(
+        async (info: CompletedDownloadInfo) => {
+            if (info.mediaType === 'video') {
+                setVideoRefreshSignal((v) => v + 1);
+                return;
+            }
+            try {
+                const currentList = tracksRef.current;
+                const existingIds = new Set(currentList.map((t) => t.id));
+                const existingUris = new Set(currentList.map((t) => t.uri));
+                const existingFilenames = new Set(currentList.map((t) => t.filename.toLowerCase()));
+
+                let addedTrack = await upsertSingleDownloadedAudio({
+                    filePath: info.filePath,
+                    fileName: info.fileName,
+                    title: info.title,
+                    thumbnail: info.thumbnail,
+                    existingIds,
+                    existingUris,
+                    existingFilenames,
+                });
+
+                if (!addedTrack) return;
+
+                // Intenta enriquecer inmediatamente las etiquetas ID3/carátula solo de esta canción nueva
+                try {
+                    const tags = await readTrackTags(addedTrack.uri, addedTrack.id);
+                    if (tags) {
+                        addedTrack = {
+                            ...addedTrack,
+                            title: tags.title || addedTrack.title,
+                            artist: tags.artist || addedTrack.artist,
+                            album: tags.album || addedTrack.album,
+                            artworkUri: tags.artworkUri ?? addedTrack.artworkUri,
+                            dominantColor: tags.dominantColor ?? addedTrack.dominantColor,
+                        };
+                        await updateTrackMetadata(addedTrack.id, addedTrack);
+                    }
+                } catch { }
+
+                const finalTrack = addedTrack;
+                setTracks((prev) => {
+                    if (
+                        prev.some(
+                            (t) =>
+                                t.id === finalTrack.id ||
+                                t.uri === finalTrack.uri ||
+                                t.filename.toLowerCase() === finalTrack.filename.toLowerCase()
+                        )
+                    ) {
+                        return prev;
+                    }
+                    return sortTracksInMemory([finalTrack, ...prev], sortBy);
+                });
+                setLibraryVersion((v) => v + 1);
+            } catch { }
+        },
+        [sortBy]
+    );
+
+    // Pull-to-refresh incremental rápido: conserva las canciones actuales y agrega solo las faltantes del dispositivo
+    const handleIncrementalAudioRefresh = useCallback(async () => {
+        if (refreshingRef.current) return;
+        refreshingRef.current = true;
+        setRefreshingLibrary(true);
+        try {
+            const currentList = tracksRef.current;
+            const existingIds = new Set(currentList.map((t) => t.id));
+            const existingUris = new Set(currentList.map((t) => t.uri));
+            const existingFilenames = new Set(currentList.map((t) => t.filename.toLowerCase()));
+
+            const missingTracks = await scanMissingAudioTracks(
+                existingIds,
+                existingUris,
+                existingFilenames
+            );
+
+            if (missingTracks.length > 0) {
+                setTracks((prev) => {
+                    const prevIds = new Set(prev.map((t) => t.id));
+                    const prevUris = new Set(prev.map((t) => t.uri));
+                    const uniqueNew = missingTracks.filter(
+                        (t) => !prevIds.has(t.id) && !prevUris.has(t.uri)
+                    );
+                    if (uniqueNew.length === 0) return prev;
+                    return sortTracksInMemory([...uniqueNew, ...prev], sortBy);
+                });
+                setLibraryVersion((v) => v + 1);
+                // Enriquece metadatos únicamente de las canciones recién agregadas
+                enrichMetadataInBackground(missingTracks).catch(() => { });
+            } else {
+                setLibraryVersion((v) => v + 1);
+            }
+        } catch {
+        } finally {
+            refreshingRef.current = false;
+            setRefreshingLibrary(false);
+        }
+    }, [sortBy, enrichMetadataInBackground]);
 
     // Mantiene centrada la pestaña activa en la barra horizontal superior
     const syncTabBarScroll = useCallback(
@@ -634,7 +795,7 @@ export const SongsScreen: React.FC = () => {
                         {visitedTabs[0] && (
                             <DownloadsTab
                                 isActive={activeIndex === 0}
-                                onDownloadCompleted={() => loadLibrary(sortBy, false)}
+                                onDownloadCompleted={handleDownloadCompleted}
                             />
                         )}
                     </View>
@@ -645,6 +806,10 @@ export const SongsScreen: React.FC = () => {
                             tracks={tracks}
                             sortBy={sortBy}
                             selectedIds={selectedIds}
+                            currentTrackId={currentTrack?.id ?? null}
+                            isPlaying={isPlaying}
+                            refreshing={refreshingLibrary}
+                            onRefresh={handleIncrementalAudioRefresh}
                             mutedColor={mutedColor}
                             onToggleSelect={toggleSelect}
                             onClearSelect={clearSelection}
@@ -661,7 +826,12 @@ export const SongsScreen: React.FC = () => {
                     {/* Página 2: Playlists */}
                     <View style={{ width: screenWidth, flex: 1 }}>
                         {visitedTabs[2] && (
-                            <PlaylistsTab onOpenPlayer={openPlayer} refreshKey={libraryVersion} />
+                            <PlaylistsTab
+                                onOpenPlayer={openPlayer}
+                                refreshKey={libraryVersion}
+                                refreshing={refreshingLibrary}
+                                onRefresh={handleIncrementalAudioRefresh}
+                            />
                         )}
                     </View>
 
@@ -673,6 +843,8 @@ export const SongsScreen: React.FC = () => {
                                 onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
                                 refreshKey={libraryVersion}
+                                refreshing={refreshingLibrary}
+                                onRefresh={handleIncrementalAudioRefresh}
                             />
                         )}
                     </View>
@@ -684,6 +856,8 @@ export const SongsScreen: React.FC = () => {
                                 tracks={tracks}
                                 onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
+                                refreshing={refreshingLibrary}
+                                onRefresh={handleIncrementalAudioRefresh}
                             />
                         )}
                     </View>
@@ -695,13 +869,15 @@ export const SongsScreen: React.FC = () => {
                                 tracks={tracks}
                                 onOpenPlayer={openPlayer}
                                 onLibraryChanged={refreshTracks}
+                                refreshing={refreshingLibrary}
+                                onRefresh={handleIncrementalAudioRefresh}
                             />
                         )}
                     </View>
 
                     {/* Página 6: Videos */}
                     <View style={{ width: screenWidth, flex: 1 }}>
-                        {visitedTabs[6] && <VideosTab />}
+                        {visitedTabs[6] && <VideosTab refreshSignal={videoRefreshSignal} />}
                     </View>
                 </Animated.ScrollView>
             )}

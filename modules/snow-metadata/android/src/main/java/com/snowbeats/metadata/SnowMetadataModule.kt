@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -31,6 +32,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.os.bundleOf
+import androidx.core.text.HtmlCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -255,10 +260,42 @@ class SnowMetadataModule : Module() {
       }
     }
 
-    // Abre el cliente de correo con hasta 5 imágenes adjuntas mediante FileProvider
-    AsyncFunction("sendEmailWithAttachments") { to: String, subject: String, body: String, imageUris: List<String> ->
+    // Abre únicamente apps de correo con cuerpo HTML y hasta 5 imágenes adjuntas mediante FileProvider
+    AsyncFunction("sendEmailWithAttachments") { to: String, subject: String, plainBody: String, htmlBody: String, imageUris: List<String> ->
       val ctx = appContext.reactContext ?: return@AsyncFunction false
-      launchEmailWithAttachments(ctx, to, subject, body, imageUris)
+      launchEmailWithAttachments(ctx, to, subject, plainBody, htmlBody, imageUris)
+    }
+
+    // Controla la orientación de pantalla y barras inmersivas para pantalla completa horizontal en Videos
+    AsyncFunction("setScreenOrientation") { mode: String ->
+      val activity = appContext.currentActivity ?: return@AsyncFunction false
+      try {
+        activity.runOnUiThread {
+          try {
+            val window = activity.window
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            when (mode) {
+              "landscape" -> {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                controller.systemBarsBehavior =
+                  WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+              }
+              "unspecified" -> {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                controller.show(WindowInsetsCompat.Type.systemBars())
+              }
+              else -> {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                controller.show(WindowInsetsCompat.Type.systemBars())
+              }
+            }
+          } catch (_: Exception) { }
+        }
+        true
+      } catch (_: Exception) {
+        false
+      }
     }
 
     // Verifica permiso de escritura en almacenamiento interno para guardar descargas
@@ -427,13 +464,14 @@ class SnowMetadataModule : Module() {
     }
   }
 
-  // ==================== ENVÍO DE CORREO CON IMÁGENES ADJUNTAS ====================
+  // ==================== ENVÍO DE CORREO (SOLO EMAIL) CON HTML E IMÁGENES ADJUNTAS ====================
 
   private fun launchEmailWithAttachments(
     ctx: Context,
     to: String,
     subject: String,
-    body: String,
+    plainBody: String,
+    htmlBody: String,
     imageUris: List<String>
   ): Boolean {
     return try {
@@ -444,7 +482,7 @@ class SnowMetadataModule : Module() {
       imageUris.take(5).forEachIndexed { idx, rawUri ->
         try {
           val parsed = Uri.parse(rawUri)
-          val dest = File(cacheDir, "capture_${System.currentTimeMillis()}_$idx.jpg")
+          val dest = File(cacheDir, "snow_report_${System.currentTimeMillis()}_$idx.jpg")
           ctx.contentResolver.openInputStream(parsed)?.use { input ->
             FileOutputStream(dest).use { output -> input.copyTo(output) }
           }
@@ -454,38 +492,96 @@ class SnowMetadataModule : Module() {
         } catch (_: Exception) { }
       }
 
-      val intent = if (contentUris.isEmpty()) {
-        Intent(Intent.ACTION_SENDTO).apply {
-          data = Uri.parse("mailto:")
-          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-          putExtra(Intent.EXTRA_SUBJECT, subject)
-          putExtra(Intent.EXTRA_TEXT, body)
-        }
-      } else if (contentUris.size == 1) {
-        Intent(Intent.ACTION_SEND).apply {
-          type = "image/*"
-          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-          putExtra(Intent.EXTRA_SUBJECT, subject)
-          putExtra(Intent.EXTRA_TEXT, body)
-          putExtra(Intent.EXTRA_STREAM, contentUris[0])
-          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+      // Selector mailto: restringe la resolución estrictamente a clientes de correo (excluye WhatsApp, Telegram, etc.)
+      val emailSelector = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("mailto:")
+      }
+
+      // Otorga permiso explícito de lectura FileProvider a todos los clientes de correo instalados
+      if (contentUris.isNotEmpty()) {
+        try {
+          val emailApps = ctx.packageManager.queryIntentActivities(emailSelector, 0)
+          for (resolveInfo in emailApps) {
+            val pkg = resolveInfo.activityInfo?.packageName ?: continue
+            for (uri in contentUris) {
+              ctx.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+          }
+        } catch (_: Exception) { }
+      }
+
+      val richSpanned: CharSequence = if (htmlBody.isNotBlank()) {
+        HtmlCompat.fromHtml(htmlBody, HtmlCompat.FROM_HTML_MODE_LEGACY)
       } else {
-        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-          type = "image/*"
-          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-          putExtra(Intent.EXTRA_SUBJECT, subject)
-          putExtra(Intent.EXTRA_TEXT, body)
-          putParcelableArrayListExtra(Intent.EXTRA_STREAM, contentUris)
-          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        plainBody
+      }
+
+      val emailIntent = when {
+        contentUris.isEmpty() -> {
+          Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:")
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, richSpanned)
+            if (htmlBody.isNotBlank()) {
+              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
+            }
+          }
+        }
+        contentUris.size == 1 -> {
+          Intent(Intent.ACTION_SEND).apply {
+            selector = emailSelector
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, richSpanned)
+            if (htmlBody.isNotBlank()) {
+              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
+            }
+            putExtra(Intent.EXTRA_STREAM, contentUris[0])
+            clipData = ClipData.newUri(ctx.contentResolver, "Snow Beats Report", contentUris[0])
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          }
+        }
+        else -> {
+          Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            selector = emailSelector
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, richSpanned)
+            if (htmlBody.isNotBlank()) {
+              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
+            }
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, contentUris)
+            val clip = ClipData.newUri(ctx.contentResolver, "Snow Beats Report", contentUris[0])
+            for (i in 1 until contentUris.size) {
+              clip.addItem(ClipData.Item(contentUris[i]))
+            }
+            clipData = clip
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          }
         }
       }
 
-      val chooser = Intent.createChooser(intent, "Enviar reporte de Snow Beats").apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      emailIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+      try {
+        ctx.startActivity(emailIntent)
+        true
+      } catch (_: Exception) {
+        // Respaldo: si el dispositivo no admite selector con adjuntos, abre directamente mailto: solo para email
+        val fallbackMailto = Intent(Intent.ACTION_SENDTO).apply {
+          data = Uri.parse("mailto:${Uri.encode(to)}")
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, richSpanned)
+          if (htmlBody.isNotBlank()) {
+            putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
+          }
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        ctx.startActivity(fallbackMailto)
+        true
       }
-      ctx.startActivity(chooser)
-      true
     } catch (_: Exception) {
       false
     }

@@ -8,6 +8,7 @@ import {
     StyleSheet,
     Alert,
     BackHandler,
+    RefreshControl,
 } from 'react-native';
 import { Plus, Heart, Clock, Flame, FileText, ArrowLeft, Trash2, ChevronRight } from 'lucide-react-native';
 import {
@@ -29,15 +30,23 @@ import { AnimatedBottomSheet } from '../components/AnimatedBottomSheet';
 interface PlaylistsTabProps {
     onOpenPlayer?: () => void;
     refreshKey?: number;
+    refreshing?: boolean;
+    onRefresh?: () => Promise<void> | void;
 }
 
-export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(({ onOpenPlayer, refreshKey = 0 }) => {
-    const { fgColor, mutedColor } = useTheme();
-    const { playTrack } = usePlayer();
-    const [playlists, setPlaylists] = useState<Playlist[]>([]);
-    const [modalOpen, setModalOpen] = useState(false);
-    const [newName, setNewName] = useState('');
-    const [opened, setOpened] = useState<{ id: string | null; title: string; tracks: Track[] } | null>(null);
+export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
+    ({ onOpenPlayer, refreshKey = 0, refreshing = false, onRefresh }) => {
+        const { fgColor, mutedColor } = useTheme();
+        const { currentTrack, isPlaying, playTrack } = usePlayer();
+        const [playlists, setPlaylists] = useState<Playlist[]>([]);
+        const [modalOpen, setModalOpen] = useState(false);
+        const [newName, setNewName] = useState('');
+        const [opened, setOpened] = useState<{
+            id: string | null;
+            autoKey?: 'favorites' | 'recent' | 'most_played' | 'with_lyrics';
+            title: string;
+            tracks: Track[];
+        } | null>(null);
 
     const load = useCallback(async () => {
         setPlaylists(await getPlaylists());
@@ -64,6 +73,22 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(({ onOpenPla
         setModalOpen(false);
         load();
     };
+
+    const handlePullRefresh = useCallback(async () => {
+        if (onRefresh) {
+            await onRefresh();
+        }
+        await load();
+        if (opened) {
+            if (opened.id) {
+                const refreshed = await getPlaylistTracks(opened.id);
+                setOpened((prev) => (prev ? { ...prev, tracks: refreshed } : null));
+            } else if (opened.autoKey) {
+                const refreshed = await getAutoPlaylistTracks(opened.autoKey);
+                setOpened((prev) => (prev ? { ...prev, tracks: refreshed } : null));
+            }
+        }
+    }, [onRefresh, load, opened]);
 
     // Vista interna de una playlist abierta
     if (opened) {
@@ -101,25 +126,40 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(({ onOpenPla
                 <FlatList
                     data={opened.tracks}
                     keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                        <SongCard
-                            track={item}
-                            onPress={(t) => {
-                                playTrack(t, opened.tracks);
-                                onOpenPlayer?.();
-                            }}
-                            onLongPress={
-                                opened.id
-                                    ? async () => {
-                                        await removeTrackFromPlaylist(opened.id!, item.id);
-                                        const refreshed = await getPlaylistTracks(opened.id!);
-                                        setOpened({ ...opened, tracks: refreshed });
-                                        load();
-                                    }
-                                    : undefined
-                            }
+                    extraData={{ currentTrackId: currentTrack?.id ?? null, isPlaying }}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={handlePullRefresh}
+                            colors={['#38BDF8', '#1E3A8A']}
+                            tintColor="#38BDF8"
+                            progressBackgroundColor="#111827"
                         />
-                    )}
+                    }
+                    renderItem={({ item }) => {
+                        const isCurrent = currentTrack?.id === item.id;
+                        return (
+                            <SongCard
+                                track={item}
+                                isCurrentTrack={isCurrent}
+                                isPlaying={isCurrent && isPlaying}
+                                onPress={(t) => {
+                                    playTrack(t, opened.tracks);
+                                    onOpenPlayer?.();
+                                }}
+                                onLongPress={
+                                    opened.id
+                                        ? async () => {
+                                            await removeTrackFromPlaylist(opened.id!, item.id);
+                                            const refreshed = await getPlaylistTracks(opened.id!);
+                                            setOpened({ ...opened, tracks: refreshed });
+                                            load();
+                                        }
+                                        : undefined
+                                }
+                            />
+                        );
+                    }}
                     ListEmptyComponent={
                         <Text style={{ color: mutedColor, textAlign: 'center', marginTop: 32 }}>
                             Esta playlist aún no tiene canciones.
@@ -139,31 +179,50 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(({ onOpenPla
 
     return (
         <View style={styles.container}>
-            <TouchableOpacity style={styles.newBtn} onPress={() => setModalOpen(true)}>
-                <Plus size={20} color="#000000" />
-                <Text style={styles.newBtnText}>Nueva playlist</Text>
-            </TouchableOpacity>
-
-            <Text style={[styles.sectionTitle, { color: mutedColor }]}>Listas automáticas</Text>
-            {autoLists.map(({ key, label, icon: Icon }) => (
-                <TouchableOpacity
-                    key={key}
-                    style={styles.row}
-                    onPress={async () =>
-                        setOpened({ id: null, title: label, tracks: await getAutoPlaylistTracks(key) })
-                    }
-                >
-                    <Icon size={20} color={fgColor} />
-                    <Text style={[styles.rowText, { color: fgColor }]}>{label}</Text>
-                </TouchableOpacity>
-            ))}
-
-            <Text style={[styles.sectionTitle, { color: mutedColor, marginTop: 18 }]}>
-                Tus playlists ({playlists.length})
-            </Text>
             <FlatList
                 data={playlists}
                 keyExtractor={(item) => item.id}
+                contentContainerStyle={{ flexGrow: 1 }}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handlePullRefresh}
+                        colors={['#38BDF8', '#1E3A8A']}
+                        tintColor="#38BDF8"
+                        progressBackgroundColor="#111827"
+                    />
+                }
+                ListHeaderComponent={
+                    <View>
+                        <TouchableOpacity style={styles.newBtn} onPress={() => setModalOpen(true)}>
+                            <Plus size={20} color="#000000" />
+                            <Text style={styles.newBtnText}>Nueva playlist</Text>
+                        </TouchableOpacity>
+
+                        <Text style={[styles.sectionTitle, { color: mutedColor }]}>Listas automáticas</Text>
+                        {autoLists.map(({ key, label, icon: Icon }) => (
+                            <TouchableOpacity
+                                key={key}
+                                style={styles.row}
+                                onPress={async () =>
+                                    setOpened({
+                                        id: null,
+                                        autoKey: key,
+                                        title: label,
+                                        tracks: await getAutoPlaylistTracks(key),
+                                    })
+                                }
+                            >
+                                <Icon size={20} color={fgColor} />
+                                <Text style={[styles.rowText, { color: fgColor }]}>{label}</Text>
+                            </TouchableOpacity>
+                        ))}
+
+                        <Text style={[styles.sectionTitle, { color: mutedColor, marginTop: 18 }]}>
+                            Tus playlists ({playlists.length})
+                        </Text>
+                    </View>
+                }
                 renderItem={({ item }) => (
                     <TouchableOpacity
                         style={styles.playlistRow}

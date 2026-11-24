@@ -6,20 +6,92 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
+    useColorScheme,
     View,
 } from 'react-native';
 import { Check, Music } from 'lucide-react-native';
 import { Track } from '../../types/music';
-import { useTheme } from '../../theme/ThemeContext';
+import { resolveIsDarkMode, useTheme } from '../../theme/ThemeContext';
 
 interface SongCardProps {
     track: Track;
     onPress: (track: Track) => void;
     highlightQuery?: string;
     selected?: boolean;
+    isCurrentTrack?: boolean;
+    isPlaying?: boolean;
     onLongPress?: (track: Track) => void;
     onArtworkPress?: (track: Track) => void;
 }
+
+// Tres barras de sonido animadas sobre la carátula de la canción en reproducción
+const PlayingSoundBars: React.FC<{ isPlaying: boolean }> = React.memo(({ isPlaying }) => {
+    const bar1 = useRef(new Animated.Value(0.35)).current;
+    const bar2 = useRef(new Animated.Value(0.8)).current;
+    const bar3 = useRef(new Animated.Value(0.5)).current;
+
+    useEffect(() => {
+        if (!isPlaying) {
+            bar1.stopAnimation();
+            bar2.stopAnimation();
+            bar3.stopAnimation();
+            Animated.parallel([
+                Animated.timing(bar1, { toValue: 0.3, duration: 180, useNativeDriver: true }),
+                Animated.timing(bar2, { toValue: 0.55, duration: 180, useNativeDriver: true }),
+                Animated.timing(bar3, { toValue: 0.38, duration: 180, useNativeDriver: true }),
+            ]).start();
+            return;
+        }
+
+        const createBarLoop = (anim: Animated.Value, minV: number, maxV: number, durUp: number, durDown: number) =>
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(anim, {
+                        toValue: maxV,
+                        duration: durUp,
+                        easing: Easing.inOut(Easing.ease),
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(anim, {
+                        toValue: minV,
+                        duration: durDown,
+                        easing: Easing.inOut(Easing.ease),
+                        useNativeDriver: true,
+                    }),
+                ])
+            );
+
+        const anim1 = createBarLoop(bar1, 0.25, 0.95, 320, 280);
+        const anim2 = createBarLoop(bar2, 0.3, 1.0, 240, 340);
+        const anim3 = createBarLoop(bar3, 0.22, 0.88, 360, 260);
+
+        anim1.start();
+        anim2.start();
+        anim3.start();
+
+        return () => {
+            anim1.stop();
+            anim2.stop();
+            anim3.stop();
+        };
+    }, [isPlaying, bar1, bar2, bar3]);
+
+    return (
+        <View style={styles.soundBarsRow}>
+            {[bar1, bar2, bar3].map((val, idx) => (
+                <Animated.View
+                    key={idx}
+                    style={[
+                        styles.soundBar,
+                        {
+                            transform: [{ scaleY: val }],
+                        },
+                    ]}
+                />
+            ))}
+        </View>
+    );
+});
 
 function HighlightedText({ text, query, style }: { text: string; query?: string; style: any }) {
     if (!query?.trim()) {
@@ -41,10 +113,24 @@ function HighlightedText({ text, query, style }: { text: string; query?: string;
 }
 
 export const SongCard: React.FC<SongCardProps> = React.memo(
-    ({ track, onPress, highlightQuery, selected = false, onLongPress, onArtworkPress }) => {
-        const { fgColor, mutedColor } = useTheme();
+    ({
+        track,
+        onPress,
+        highlightQuery,
+        selected = false,
+        isCurrentTrack = false,
+        isPlaying = false,
+        onLongPress,
+        onArtworkPress,
+    }) => {
+        const { theme, fgColor, mutedColor } = useTheme();
+        const systemScheme = useColorScheme();
+        const isDarkMode = resolveIsDarkMode(theme.mode, systemScheme);
         const selectAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
         const pressScale = useRef(new Animated.Value(1)).current;
+
+        // Azul cielo en modo oscuro y azul marino en modo claro para distinguir la pista activa
+        const activeTitleColor = isDarkMode ? '#38BDF8' : '#1E3A8A';
 
         // Fade-in suave al azul al seleccionar y fade-out al deseleccionar
         useEffect(() => {
@@ -95,6 +181,14 @@ export const SongCard: React.FC<SongCardProps> = React.memo(
                 ) : (
                     <Music size={22} color="#9CA3AF" />
                 )}
+
+                {/* Capa negra al 30% + 3 barras de sonido animadas en la canción en reproducción */}
+                {isCurrentTrack && (
+                    <View pointerEvents="none" style={styles.playingOverlay}>
+                        <PlayingSoundBars isPlaying={isPlaying} />
+                    </View>
+                )}
+
                 <Animated.View
                     pointerEvents="none"
                     style={[
@@ -138,7 +232,11 @@ export const SongCard: React.FC<SongCardProps> = React.memo(
                             <HighlightedText
                                 text={track.title}
                                 query={highlightQuery}
-                                style={[styles.title, { color: fgColor }]}
+                                style={[
+                                    styles.title,
+                                    { color: isCurrentTrack ? activeTitleColor : fgColor },
+                                    isCurrentTrack && styles.titleActive,
+                                ]}
                             />
 
                             <View style={styles.subtitleRow}>
@@ -180,6 +278,29 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         marginRight: 12,
     },
+    playingOverlay: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.30)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    soundBarsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 3.5,
+        height: 20,
+    },
+    soundBar: {
+        width: 3.5,
+        height: 18,
+        borderRadius: 2,
+        backgroundColor: '#FFFFFF',
+    },
     checkOverlay: {
         position: 'absolute',
         top: 0,
@@ -202,6 +323,9 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 15,
         fontWeight: '600',
+    },
+    titleActive: {
+        fontWeight: '700',
     },
     subtitleRow: {
         flexDirection: 'row',

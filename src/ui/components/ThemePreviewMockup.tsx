@@ -17,11 +17,12 @@ interface ThemePreviewMockupProps {
     variant: 'songs' | 'player';
     width?: number;
     height?: number;
+    onImageLoaded?: () => void;
 }
 
 // Vista previa en vivo de la UI de Snow Beats usando carátulas reales y tema aplicado
 export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
-    ({ previewTheme, variant, width = 220, height = 340 }) => {
+    ({ previewTheme, variant, width = 220, height = 340, onImageLoaded }) => {
         const systemScheme = useColorScheme();
         const isLightText = resolveIsLightText(previewTheme, systemScheme);
         const fg = isLightText ? '#FFFFFF' : '#111827';
@@ -46,6 +47,8 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                         <ImageBackground
                             source={source}
                             blurRadius={previewTheme.customImage.blur}
+                            fadeDuration={0}
+                            onLoadEnd={onImageLoaded}
                             style={styles.fill}
                             imageStyle={styles.fillImage}
                             resizeMode="cover"

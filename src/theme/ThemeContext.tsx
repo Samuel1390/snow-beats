@@ -149,6 +149,7 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
                 <ImageBackground
                     source={source}
                     blurRadius={theme.customImage.blur}
+                    fadeDuration={0}
                     style={styles.fill}
                     imageStyle={styles.fillImage}
                     resizeMode="cover"

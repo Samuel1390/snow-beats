@@ -5,6 +5,7 @@ import {
     Text,
     TouchableOpacity,
     StyleSheet,
+    RefreshControl,
 } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { CollageArtwork } from '../components/CollageArtWork';
@@ -23,6 +24,8 @@ interface ArtistsTabProps {
     tracks: Track[];
     onOpenPlayer?: () => void;
     onLibraryChanged?: () => Promise<void> | void;
+    refreshing?: boolean;
+    onRefresh?: () => void;
 }
 
 const ROW_HEIGHT = 76;
@@ -52,7 +55,7 @@ const ArtistRow: React.FC<{
 ));
 
 export const ArtistsTab: React.FC<ArtistsTabProps> = React.memo(
-    ({ tracks, onOpenPlayer, onLibraryChanged }) => {
+    ({ tracks, onOpenPlayer, onLibraryChanged, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
         const [openedArtistName, setOpenedArtistName] = useState<string | null>(null);
 
@@ -127,6 +130,8 @@ export const ArtistsTab: React.FC<ArtistsTabProps> = React.memo(
                     onBack={handleBack}
                     onOpenPlayer={onOpenPlayer}
                     onTracksChanged={onLibraryChanged}
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
                 />
             );
         }
@@ -139,7 +144,18 @@ export const ArtistsTab: React.FC<ArtistsTabProps> = React.memo(
                 initialNumToRender={14}
                 maxToRenderPerBatch={10}
                 windowSize={5}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1 }}
+                refreshControl={
+                    onRefresh ? (
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            colors={['#38BDF8', '#1E3A8A']}
+                            tintColor="#38BDF8"
+                            progressBackgroundColor="#111827"
+                        />
+                    ) : undefined
+                }
                 renderItem={renderItem}
                 ListEmptyComponent={
                     <Text style={[styles.fallbackText, { color: mutedColor }]}>

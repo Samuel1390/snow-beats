@@ -16,6 +16,7 @@ import {
     getVisibleTracks,
     searchTracks,
 } from '../../storage/database/db';
+import { usePlayer } from '../../audio-engine/PlayerContext';
 import { SongCard } from './SongCard';
 
 interface SearchModalProps {
@@ -49,6 +50,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     onClose,
     onSelectTrack,
 }) => {
+    const { currentTrack, isPlaying } = usePlayer();
     const [query, setQuery] = useState('');
     const [history, setHistory] = useState<string[]>([]);
     const [results, setResults] = useState<Track[]>([]);
@@ -150,18 +152,24 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     <FlatList
                         data={results}
                         keyExtractor={(item) => item.id}
+                        extraData={{ currentTrackId: currentTrack?.id ?? null, isPlaying }}
                         keyboardShouldPersistTaps="handled"
-                        renderItem={({ item }) => (
-                            <SongCard
-                                track={item}
-                                highlightQuery={query}
-                                onPress={async (t) => {
-                                    await addSearchHistory(query);
-                                    onSelectTrack(t);
-                                    onClose();
-                                }}
-                            />
-                        )}
+                        renderItem={({ item }) => {
+                            const isCurrent = currentTrack?.id === item.id;
+                            return (
+                                <SongCard
+                                    track={item}
+                                    highlightQuery={query}
+                                    isCurrentTrack={isCurrent}
+                                    isPlaying={isCurrent && isPlaying}
+                                    onPress={async (t) => {
+                                        await addSearchHistory(query);
+                                        onSelectTrack(t);
+                                        onClose();
+                                    }}
+                                />
+                            );
+                        }}
                         ListEmptyComponent={
                             <Text style={styles.emptyText}>No se encontraron coincidencias.</Text>
                         }

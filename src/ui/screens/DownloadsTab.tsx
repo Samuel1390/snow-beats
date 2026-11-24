@@ -70,9 +70,17 @@ interface DownloadQueueItem {
     savedFileName?: string;
 }
 
+export interface CompletedDownloadInfo {
+    filePath?: string;
+    fileName?: string;
+    mediaType: 'audio' | 'video';
+    title: string;
+    thumbnail?: string | null;
+}
+
 interface DownloadsTabProps {
     isActive: boolean;
-    onDownloadCompleted: () => void;
+    onDownloadCompleted: (info: CompletedDownloadInfo) => void;
 }
 
 const SUPPORTED_PLATFORMS = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'X'] as const;
@@ -480,7 +488,13 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                 );
 
                 if (res.ok) {
-                    onDownloadCompleted();
+                    onDownloadCompleted({
+                        filePath: res.filePath,
+                        fileName: res.fileName,
+                        mediaType: nextItem.format.mediaType,
+                        title: nextItem.title,
+                        thumbnail: nextItem.thumbnail,
+                    });
                 }
             } catch (err: any) {
                 setQueue((prev) =>

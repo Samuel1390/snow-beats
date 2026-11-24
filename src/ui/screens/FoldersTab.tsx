@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, Switch, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+    View,
+    Text,
+    FlatList,
+    Switch,
+    TouchableOpacity,
+    StyleSheet,
+    RefreshControl,
+} from 'react-native';
 import { ChevronRight, Folder } from 'lucide-react-native';
 import { FolderItem, getFolders, getTracksByFolder } from '../../storage/database/db';
 import { Track } from '../../types/music';
@@ -11,10 +19,12 @@ interface FoldersTabProps {
     onOpenPlayer?: () => void;
     onLibraryChanged?: () => Promise<void> | void;
     refreshKey?: number;
+    refreshing?: boolean;
+    onRefresh?: () => void;
 }
 
 export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
-    ({ tracks, onOpenPlayer, onLibraryChanged, refreshKey = 0 }) => {
+    ({ tracks, onOpenPlayer, onLibraryChanged, refreshKey = 0, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
         const [showHidden, setShowHidden] = useState(false);
         const [hiddenFolders, setHiddenFolders] = useState<FolderItem[]>([]);
@@ -62,6 +72,15 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
             [showHidden, tracks]
         );
 
+        // Mantiene actualizada la vista abierta si llegan nuevas canciones tras un pull-to-refresh
+        useEffect(() => {
+            if (!opened || showHidden) return;
+            const list = tracks
+                .filter((t) => t.folderPath === opened.folder.path)
+                .sort((a, b) => a.title.localeCompare(b.title));
+            setOpened((prev) => (prev ? { ...prev, tracks: list } : null));
+        }, [tracks, showHidden, opened?.folder.path]);
+
         const handleBack = useCallback(() => setOpened(null), []);
 
         // Vista interna con las canciones de la carpeta seleccionada
@@ -73,6 +92,8 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
                     tracks={opened.tracks}
                     onBack={handleBack}
                     onOpenPlayer={onOpenPlayer}
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
                     onTracksChanged={async () => {
                         if (showHidden) {
                             const refreshed = await getTracksByFolder(opened.folder.path, true);
@@ -101,6 +122,18 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
                     initialNumToRender={15}
                     maxToRenderPerBatch={10}
                     windowSize={5}
+                    contentContainerStyle={{ flexGrow: 1 }}
+                    refreshControl={
+                        onRefresh ? (
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                colors={['#38BDF8', '#1E3A8A']}
+                                tintColor="#38BDF8"
+                                progressBackgroundColor="#111827"
+                            />
+                        ) : undefined
+                    }
                     renderItem={({ item }) => (
                         <TouchableOpacity
                             style={styles.row}

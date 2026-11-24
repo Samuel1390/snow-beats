@@ -8,6 +8,7 @@ import {
     StyleSheet,
     Alert,
     BackHandler,
+    RefreshControl,
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { ArrowLeft, Play, Shuffle } from 'lucide-react-native';
@@ -26,6 +27,8 @@ interface TrackGroupDetailProps {
     onBack: () => void;
     onOpenPlayer?: () => void;
     onTracksChanged?: () => Promise<void> | void;
+    refreshing?: boolean;
+    onRefresh?: () => void;
 }
 
 // Vista reutilizable de detalle de canciones para Carpetas, Artistas y Álbumes
@@ -36,9 +39,11 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
     onBack,
     onOpenPlayer,
     onTracksChanged,
+    refreshing = false,
+    onRefresh,
 }) => {
     const { fgColor, mutedColor } = useTheme();
-    const { playTrack, addToQueue } = usePlayer();
+    const { currentTrack, isPlaying, playTrack, addToQueue } = usePlayer();
 
     const [localTracks, setLocalTracks] = useState<Track[]>(tracks);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -212,26 +217,42 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
             <FlatList
                 data={localTracks}
                 keyExtractor={(item) => item.id}
-                extraData={selectedIds}
+                extraData={{ selectedIds, currentTrackId: currentTrack?.id ?? null, isPlaying }}
                 initialNumToRender={15}
                 maxToRenderPerBatch={10}
                 windowSize={5}
-                renderItem={({ item }) => (
-                    <SongCard
-                        track={item}
-                        selected={selectedIds.includes(item.id)}
-                        onPress={(selected) => {
-                            if (selectedIds.length > 0) {
-                                toggleSelect(selected.id);
-                            } else {
-                                playTrack(selected, localTracks);
-                                onOpenPlayer?.();
-                            }
-                        }}
-                        onLongPress={(selected) => toggleSelect(selected.id)}
-                        onArtworkPress={(selected) => toggleSelect(selected.id)}
-                    />
-                )}
+                refreshControl={
+                    onRefresh ? (
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            colors={['#38BDF8', '#1E3A8A']}
+                            tintColor="#38BDF8"
+                            progressBackgroundColor="#111827"
+                        />
+                    ) : undefined
+                }
+                renderItem={({ item }) => {
+                    const isCurrent = currentTrack?.id === item.id;
+                    return (
+                        <SongCard
+                            track={item}
+                            selected={selectedIds.includes(item.id)}
+                            isCurrentTrack={isCurrent}
+                            isPlaying={isCurrent && isPlaying}
+                            onPress={(selected) => {
+                                if (selectedIds.length > 0) {
+                                    toggleSelect(selected.id);
+                                } else {
+                                    playTrack(selected, localTracks);
+                                    onOpenPlayer?.();
+                                }
+                            }}
+                            onLongPress={(selected) => toggleSelect(selected.id)}
+                            onArtworkPress={(selected) => toggleSelect(selected.id)}
+                        />
+                    );
+                }}
                 ListEmptyComponent={
                     <Text style={[styles.emptyText, { color: mutedColor }]}>
                         No hay canciones disponibles en este grupo.
