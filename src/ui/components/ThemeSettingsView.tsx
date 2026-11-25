@@ -35,6 +35,7 @@ import { THEME_IMAGE_PRESETS } from '../../theme/themeAssets';
 import { CustomImageBackground, ThemeConfig } from '../../types/theme';
 import { ThemePreviewMockup } from './ThemePreviewMockup';
 import { ColorPickerModal } from './ColorPickerModal';
+import { useI18n } from '../../i18n/LanguageContext';
 
 interface ThemeSettingsViewProps {
     onBack: () => void;
@@ -42,6 +43,7 @@ interface ThemeSettingsViewProps {
 
 export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({ onBack }) => {
     const { theme, updateTheme } = useTheme();
+    const { t } = useI18n();
     const systemScheme = useColorScheme();
     const insets = useSafeAreaInsets();
     const isDarkMode = resolveIsDarkMode(theme.mode, systemScheme);
@@ -129,9 +131,9 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                 });
             }
         } catch {
-            Alert.alert('Imagen', 'No se pudo abrir la galería de imágenes.');
+            Alert.alert(t('theme.galleryErrorTitle'), t('theme.galleryErrorBody'));
         }
-    }, []);
+    }, [t]);
 
     // Guarda la imagen ajustada al pulsar el Check superior derecho
     const handleAcceptImage = useCallback(() => {
@@ -190,10 +192,17 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
         [customGradients, updateTheme]
     );
 
-    // Al cambiar entre Oscuro / Claro / Sistema, conserva imagen predeterminada cambiando a su variante dark/light
+    // Al cambiar entre Oscuro / Claro / Sistema, conserva imágenes y gradientes y solo alterna sólido en modo sólido
     const handleModeChange = useCallback(
         (nextMode: ThemeConfig['mode']) => {
-            if (theme.backgroundType === 'image' && theme.customImage?.presetId) {
+            if (theme.backgroundType === 'image' && theme.customImage) {
+                updateTheme({
+                    mode: nextMode,
+                    customImage: { ...theme.customImage },
+                });
+                return;
+            }
+            if (theme.backgroundType === 'gradient') {
                 updateTheme({ mode: nextMode });
                 return;
             }
@@ -204,7 +213,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                 solidColor: nextDark ? '#0A0A0A' : '#FFFFFF',
             });
         },
-        [theme.backgroundType, theme.customImage?.presetId, systemScheme, updateTheme]
+        [theme.backgroundType, theme.customImage, systemScheme, updateTheme]
     );
 
     const pendingPreviewTheme: ThemeConfig | null = pendingImage
@@ -222,7 +231,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                 <TouchableOpacity onPress={onBack} style={styles.iconBtn}>
                     <ArrowLeft size={22} color="#FFFFFF" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Tema</Text>
+                <Text style={styles.headerTitle}>{t('theme.title')}</Text>
             </View>
 
             <ScrollView
@@ -254,9 +263,9 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                 <View style={styles.modeSegmented}>
                     {(
                         [
-                            { key: 'dark', label: 'Oscuro', Icon: Moon },
-                            { key: 'light', label: 'Claro', Icon: Sun },
-                            { key: 'system', label: 'Sistema', Icon: Contrast },
+                            { key: 'dark', label: t('theme.mode.dark'), Icon: Moon },
+                            { key: 'light', label: t('theme.mode.light'), Icon: Sun },
+                            { key: 'system', label: t('theme.mode.system'), Icon: Contrast },
                         ] as const
                     ).map(({ key, label, Icon }) => {
                         const active = theme.mode === key;
@@ -282,7 +291,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                 {/* 1. COLOR SÓLIDO: Personalizados a la izquierda | barra vertical 50% | Predeterminados */}
                 <View style={styles.sectionBlock}>
-                    <Text style={styles.sectionLabel}>Color sólido</Text>
+                    <Text style={styles.sectionLabel}>{t('theme.solidColor')}</Text>
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -348,7 +357,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                 {/* 2. GRADIENTES: Personalizados a la izquierda | barra vertical 50% | Círculos sin texto */}
                 <View style={styles.sectionBlock}>
-                    <Text style={styles.sectionLabel}>Gradientes</Text>
+                    <Text style={styles.sectionLabel}>{t('theme.gradients')}</Text>
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -421,7 +430,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                 {/* 3. IMAGEN PERSONALIZADA: Personalizadas a la izquierda | barra vertical 50% | Predeterminadas dark/light */}
                 <View style={styles.sectionBlock}>
-                    <Text style={styles.sectionLabel}>Imagen personalizada</Text>
+                    <Text style={styles.sectionLabel}>{t('theme.customImage')}</Text>
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -433,7 +442,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                             onPress={handlePickNewImage}
                         >
                             <ImagePlus size={24} color="#FFFFFF" />
-                            <Text style={styles.addImageText}>Agregar</Text>
+                            <Text style={styles.addImageText}>{t('theme.addImage')}</Text>
                         </TouchableOpacity>
 
                         {customImages.map((img) => {
@@ -463,8 +472,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                     >
                                         <Image
                                             source={{ uri: img.uri }}
-                                            blurRadius={img.blur}
-                                            fadeDuration={0}
+                                            blurRadius={img.blur > 0 ? img.blur : undefined}
                                             style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
@@ -506,14 +514,15 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                         {/* 6 imágenes predeterminadas adaptadas automáticamente a modo oscuro / claro */}
                         {THEME_IMAGE_PRESETS.map((preset) => {
-                            const itemKey = `preset:${preset.id}`;
+                            const variantTag = isDarkMode ? 'dark' : 'light';
+                            const itemKey = `preset:${preset.id}:${variantTag}`;
                             const isSelected =
                                 theme.backgroundType === 'image' &&
                                 theme.customImage?.presetId === preset.id;
                             const isLoadingThis = loadingImageKey === itemKey;
                             const source = isDarkMode ? preset.dark : preset.light;
                             return (
-                                <View key={preset.id} style={styles.savedImgWrap}>
+                                <View key={`${preset.id}-${variantTag}`} style={styles.savedImgWrap}>
                                     <TouchableOpacity
                                         activeOpacity={0.85}
                                         disabled={loadingImageKey !== null}
@@ -534,8 +543,8 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         }}
                                     >
                                         <Image
+                                            key={`img-${preset.id}-${variantTag}`}
                                             source={source}
-                                            fadeDuration={0}
                                             style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
@@ -612,7 +621,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                             >
                                 <ArrowLeft size={22} color="#FFFFFF" />
                             </TouchableOpacity>
-                            <Text style={styles.headerTitle}>Ajustar fondo</Text>
+                            <Text style={styles.headerTitle}>{t('theme.adjustBackground')}</Text>
                             <TouchableOpacity
                                 style={styles.acceptCheckBtn}
                                 onPress={handleAcceptImage}
@@ -632,7 +641,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                         <View style={styles.editorControlsCard}>
                             <View style={styles.sliderRowHeader}>
-                                <Text style={styles.sliderLabel}>Brillo</Text>
+                                <Text style={styles.sliderLabel}>{t('theme.brightness')}</Text>
                                 <Text style={styles.sliderValue}>
                                     {Math.round(pendingImage.brightness)}%
                                 </Text>
@@ -653,7 +662,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                             />
 
                             <View style={[styles.sliderRowHeader, { marginTop: 12 }]}>
-                                <Text style={styles.sliderLabel}>Desenfoque (Blur)</Text>
+                                <Text style={styles.sliderLabel}>{t('theme.blur')}</Text>
                                 <Text style={styles.sliderValue}>
                                     {Math.round(pendingImage.blur)}
                                 </Text>
@@ -840,6 +849,7 @@ const styles = StyleSheet.create({
         height: 122,
         borderRadius: 16,
         overflow: 'hidden',
+        backgroundColor: '#1B2030',
         borderWidth: 1.5,
         borderColor: 'rgba(255,255,255,0.18)',
         position: 'relative',

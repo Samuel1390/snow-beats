@@ -12,6 +12,7 @@ import {
 import { Check, Music } from 'lucide-react-native';
 import { Track } from '../../types/music';
 import { resolveIsDarkMode, useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n/LanguageContext';
 
 interface SongCardProps {
     track: Track;
@@ -124,6 +125,7 @@ export const SongCard: React.FC<SongCardProps> = React.memo(
         onArtworkPress,
     }) => {
         const { theme, fgColor, mutedColor } = useTheme();
+        const { t } = useI18n();
         const systemScheme = useColorScheme();
         const isDarkMode = resolveIsDarkMode(theme.mode, systemScheme);
         const selectAnim = useRef(new Animated.Value(selected ? 1 : 0)).current;
@@ -242,7 +244,7 @@ export const SongCard: React.FC<SongCardProps> = React.memo(
                             <View style={styles.subtitleRow}>
                                 {track.hasLyrics && (
                                     <View style={styles.lyricsBadge}>
-                                        <Text style={styles.lyricsText}>Letras</Text>
+                                        <Text style={styles.lyricsText}>{t('songs.lyricsBadge')}</Text>
                                     </View>
                                 )}
                                 <HighlightedText

@@ -17,8 +17,13 @@ import {
     updateMediaNotification,
 } from '../../modules/snow-metadata';
 import {
+    addListeningSeconds,
+    getMusicAlarms,
+    getVisibleTracks,
     hideTrack,
     markTrackPlayed,
+    MusicAlarm,
+    saveMusicAlarms,
     softDeleteTrack,
     toggleTrackFavorite,
     updateTrackMetadata,
@@ -49,6 +54,17 @@ interface PlayerContextValue {
     deleteCurrentTrack: () => Promise<void>;
     addToQueue: (tracks: Track[]) => void;
     updateCurrentTrack: (patch: Partial<Track>) => void;
+    // Temporizador de apagado
+    sleepMinutes: number;
+    sleepEndsAt: number | null;
+    setSleepTimerMinutes: (minutes: number) => void;
+    // Alarma musical local
+    alarms: MusicAlarm[];
+    saveAlarmsList: (next: MusicAlarm[]) => Promise<void>;
+    createQuickAlarmForTrack: (track: Track) => Promise<MusicAlarm>;
+    ringingAlarm: MusicAlarm | null;
+    snoozeRingingAlarm: (minutes?: number) => void;
+    dismissRingingAlarm: () => void;
 }
 
 interface ProgressValue {
@@ -80,6 +96,42 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [repeatMode, setRepeatMode] = useState<RepeatMode>('repeat_all');
     const [playbackRate, setPlaybackRate] = useState<number>(1);
     const [pitch, setPitch] = useState<number>(1);
+
+    // Estado del temporizador de apagado y alarmas musicales
+    const [sleepMinutes, setSleepMinutes] = useState<number>(0);
+    const [sleepEndsAt, setSleepEndsAt] = useState<number | null>(null);
+    const [alarms, setAlarms] = useState<MusicAlarm[]>([]);
+    const [ringingAlarm, setRingingAlarm] = useState<MusicAlarm | null>(null);
+
+    const alarmsRef = useRef<MusicAlarm[]>([]);
+    const sleepEndsAtRef = useRef<number | null>(null);
+    const lastTriggeredAlarmKeyRef = useRef<Map<string, string>>(new Map());
+    const snoozedAlarmRef = useRef<{ alarm: MusicAlarm; triggerAt: number } | null>(null);
+    const fadeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const listenStartMsRef = useRef<number | null>(null);
+    const pendingListenSecRef = useRef<number>(0);
+
+    const flushListeningTime = useCallback(() => {
+        if (listenStartMsRef.current !== null) {
+            const elapsedSec = (Date.now() - listenStartMsRef.current) / 1000;
+            if (elapsedSec > 0 && elapsedSec < 3600) {
+                pendingListenSecRef.current += elapsedSec;
+            }
+            listenStartMsRef.current = Date.now();
+        }
+        const wholeSec = Math.floor(pendingListenSecRef.current);
+        if (wholeSec >= 1) {
+            pendingListenSecRef.current -= wholeSec;
+            addListeningSeconds(wholeSec).catch(() => { });
+        }
+    }, []);
+
+    const stopFadeInTimer = useCallback(() => {
+        if (fadeTimerRef.current) {
+            clearInterval(fadeTimerRef.current);
+            fadeTimerRef.current = null;
+        }
+    }, []);
 
     const addToQueue = useCallback((items: Track[]) => {
         queueRef.current = [...queueRef.current, ...items];
@@ -117,20 +169,46 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         []
     );
 
-    // Configura audio en segundo plano al iniciar
+    // Configura audio en segundo plano y carga alarmas guardadas al iniciar
     useEffect(() => {
         setAudioModeAsync({
             playsInSilentMode: true,
             shouldPlayInBackground: true,
         }).catch(() => { });
 
+        getMusicAlarms()
+            .then((list) => {
+                alarmsRef.current = list;
+                setAlarms(list);
+            })
+            .catch(() => { });
+
         return () => {
+            flushListeningTime();
+            stopFadeInTimer();
             playerRef.current?.remove();
             if (Platform.OS === 'android') {
                 dismissMediaNotification().catch(() => { });
             }
         };
-    }, []);
+    }, [flushListeningTime, stopFadeInTimer]);
+
+    // Registra segundos reales de reproducción mientras isPlaying es true
+    useEffect(() => {
+        if (isPlaying) {
+            listenStartMsRef.current = Date.now();
+            const timer = setInterval(() => {
+                flushListeningTime();
+            }, 10000);
+            return () => {
+                clearInterval(timer);
+                flushListeningTime();
+                listenStartMsRef.current = null;
+            };
+        }
+        flushListeningTime();
+        listenStartMsRef.current = null;
+    }, [isPlaying, flushListeningTime]);
 
     const playTrack = useCallback(async (track: Track, newQueue?: Track[]) => {
         const requestId = ++playRequestIdRef.current;
@@ -404,6 +482,167 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await playNext();
     }, [playNext]);
 
+    // Configura el temporizador de apagado automático
+    const setSleepTimerMinutes = useCallback((minutes: number) => {
+        const clean = Math.max(0, Math.floor(minutes));
+        setSleepMinutes(clean);
+        const endsAt = clean > 0 ? Date.now() + clean * 60 * 1000 : null;
+        sleepEndsAtRef.current = endsAt;
+        setSleepEndsAt(endsAt);
+    }, []);
+
+    // Guarda la lista completa de alarmas en estado y SQLite
+    const saveAlarmsList = useCallback(async (next: MusicAlarm[]) => {
+        alarmsRef.current = next;
+        setAlarms(next);
+        await saveMusicAlarms(next);
+    }, []);
+
+    // Crea una alarma rápida (dentro de 8 horas por defecto) usando una canción específica
+    const createQuickAlarmForTrack = useCallback(
+        async (track: Track): Promise<MusicAlarm> => {
+            const target = new Date(Date.now() + 8 * 60 * 60 * 1000);
+            const created: MusicAlarm = {
+                id: `alarm_${Date.now()}`,
+                hour: target.getHours(),
+                minute: target.getMinutes(),
+                enabled: true,
+                days: [],
+                label: track.title,
+                trackId: track.id,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                fadeIn: true,
+            };
+            const nextList = [...alarmsRef.current, created].sort(
+                (a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute)
+            );
+            await saveAlarmsList(nextList);
+            return created;
+        },
+        [saveAlarmsList]
+    );
+
+    // Dispara una alarma musical reproduciendo su canción (o aleatoria) con fade-in opcional
+    const triggerAlarmPlayback = useCallback(
+        async (alarm: MusicAlarm) => {
+            stopFadeInTimer();
+            const library = await getVisibleTracks('date_desc');
+            let chosen: Track | undefined = alarm.trackId
+                ? library.find((item) => item.id === alarm.trackId)
+                : undefined;
+            if (!chosen && library.length > 0) {
+                chosen = library[Math.floor(Math.random() * library.length)];
+            }
+
+            if (chosen) {
+                await playTrack(chosen, library);
+                if (alarm.fadeIn && playerRef.current) {
+                    try {
+                        let vol = 0.15;
+                        playerRef.current.volume = vol;
+                        fadeTimerRef.current = setInterval(() => {
+                            vol = Math.min(1, vol + 0.06);
+                            if (playerRef.current) {
+                                try {
+                                    playerRef.current.volume = vol;
+                                } catch { }
+                            }
+                            if (vol >= 1) {
+                                stopFadeInTimer();
+                            }
+                        }, 1000);
+                    } catch { }
+                }
+            }
+
+            setRingingAlarm(alarm);
+        },
+        [playTrack, stopFadeInTimer]
+    );
+
+    const snoozeRingingAlarm = useCallback(
+        (minutes = 5) => {
+            stopFadeInTimer();
+            if (ringingAlarm) {
+                snoozedAlarmRef.current = {
+                    alarm: ringingAlarm,
+                    triggerAt: Date.now() + minutes * 60 * 1000,
+                };
+            }
+            setRingingAlarm(null);
+            pausePlayback();
+        },
+        [ringingAlarm, pausePlayback, stopFadeInTimer]
+    );
+
+    const dismissRingingAlarm = useCallback(() => {
+        stopFadeInTimer();
+        snoozedAlarmRef.current = null;
+        if (playerRef.current) {
+            try {
+                playerRef.current.volume = 1;
+            } catch { }
+        }
+        setRingingAlarm(null);
+        pausePlayback();
+    }, [pausePlayback, stopFadeInTimer]);
+
+    // Programador en segundo plano: verifica temporizador de apagado y alarmas cada 10s
+    useEffect(() => {
+        const tick = () => {
+            const nowMs = Date.now();
+
+            // 1. Temporizador de apagado
+            if (sleepEndsAtRef.current !== null && nowMs >= sleepEndsAtRef.current) {
+                sleepEndsAtRef.current = null;
+                setSleepEndsAt(null);
+                setSleepMinutes(0);
+                pausePlayback();
+            }
+
+            // 2. Alarma pospuesta (Snooze)
+            if (snoozedAlarmRef.current && nowMs >= snoozedAlarmRef.current.triggerAt) {
+                const pending = snoozedAlarmRef.current.alarm;
+                snoozedAlarmRef.current = null;
+                triggerAlarmPlayback(pending).catch(() => { });
+                return;
+            }
+
+            // 3. Alarmas programadas
+            const now = new Date(nowMs);
+            const h = now.getHours();
+            const m = now.getMinutes();
+            const day = now.getDay();
+            const minuteKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()} ${h}:${m}`;
+
+            for (const alarm of alarmsRef.current) {
+                if (!alarm.enabled) continue;
+                if (alarm.hour !== h || alarm.minute !== m) continue;
+                if (alarm.days.length > 0 && !alarm.days.includes(day)) continue;
+                if (lastTriggeredAlarmKeyRef.current.get(alarm.id) === minuteKey) continue;
+
+                lastTriggeredAlarmKeyRef.current.set(alarm.id, minuteKey);
+
+                // Si es alarma de una sola vez, se desactiva automáticamente tras sonar
+                if (alarm.days.length === 0) {
+                    const updated = alarmsRef.current.map((a) =>
+                        a.id === alarm.id ? { ...a, enabled: false } : a
+                    );
+                    alarmsRef.current = updated;
+                    setAlarms(updated);
+                    saveMusicAlarms(updated).catch(() => { });
+                }
+
+                triggerAlarmPlayback(alarm).catch(() => { });
+                break;
+            }
+        };
+
+        const interval = setInterval(tick, 10000);
+        return () => clearInterval(interval);
+    }, [pausePlayback, triggerAlarmPlayback]);
+
     const playerValue = useMemo<PlayerContextValue>(
         () => ({
             currentTrack,
@@ -425,6 +664,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             deleteCurrentTrack,
             addToQueue,
             updateCurrentTrack,
+            sleepMinutes,
+            sleepEndsAt,
+            setSleepTimerMinutes,
+            alarms,
+            saveAlarmsList,
+            createQuickAlarmForTrack,
+            ringingAlarm,
+            snoozeRingingAlarm,
+            dismissRingingAlarm,
         }),
         [
             currentTrack,
@@ -446,6 +694,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             deleteCurrentTrack,
             addToQueue,
             updateCurrentTrack,
+            sleepMinutes,
+            sleepEndsAt,
+            setSleepTimerMinutes,
+            alarms,
+            saveAlarmsList,
+            createQuickAlarmForTrack,
+            ringingAlarm,
+            snoozeRingingAlarm,
+            dismissRingingAlarm,
         ]
     );
 

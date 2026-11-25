@@ -47,6 +47,7 @@ import {
 } from '../../../modules/snow-metadata';
 import { getDownloadPaths } from '../../storage/downloadSettings';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { DownloadFormatSheet } from '../components/DownloadFormatSheet';
 import { PlaylistDownloadModal } from '../components/PlaylistDownloadModal';
@@ -138,6 +139,7 @@ const StreamingVideoPreview: React.FC<{
     thumbnail?: string | null;
     isActive: boolean;
 }> = React.memo(({ streamUrl, headers, thumbnail, isActive }) => {
+    const { t } = useI18n();
     const [muted, setMuted] = useState(true);
     const [streamFailed, setStreamFailed] = useState(false);
 
@@ -205,7 +207,7 @@ const StreamingVideoPreview: React.FC<{
                     <View style={styles.videoFallbackPill}>
                         <Film size={13} color="#60A5FA" />
                         <Text style={styles.videoFallbackPillText}>
-                            Vista previa protegida · Lista para descargar
+                            {t('downloads.protectedPreview')}
                         </Text>
                     </View>
                 </View>
@@ -232,7 +234,7 @@ const StreamingVideoPreview: React.FC<{
                     <Volume2 size={18} color="#60A5FA" />
                 )}
                 <Text style={styles.muteFloatingText}>
-                    {muted ? 'Silenciado' : 'Con sonido'}
+                    {muted ? t('downloads.muted') : t('downloads.withSound')}
                 </Text>
             </TouchableOpacity>
         </View>
@@ -248,6 +250,7 @@ const StreamingAudioPreview: React.FC<{
     thumbnail?: string | null;
     isActive: boolean;
 }> = React.memo(({ streamUrl, headers, title, uploader, thumbnail, isActive }) => {
+    const { t } = useI18n();
     const audioRef = useRef<AudioPlayer | null>(null);
     const [playing, setPlaying] = useState(true);
     const [muted, setMuted] = useState(false);
@@ -321,7 +324,7 @@ const StreamingAudioPreview: React.FC<{
                     {title}
                 </Text>
                 <Text style={styles.audioPreviewSub} numberOfLines={1}>
-                    {uploader} · Streaming de audio
+                    {uploader} · {t('downloads.audioStreaming')}
                 </Text>
             </View>
             <TouchableOpacity style={styles.audioCircleBtn} onPress={toggleMute}>
@@ -337,6 +340,7 @@ const StreamingAudioPreview: React.FC<{
 export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
     ({ isActive, onDownloadCompleted }) => {
         const { fgColor, mutedColor, isLightText } = useTheme();
+        const { t } = useI18n();
         const { pausePlayback } = usePlayer();
 
         const [urlInput, setUrlInput] = useState('');
@@ -474,7 +478,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 ...item,
                                 status: 'cancelled',
                                 errorCode: 'CANCELLED',
-                                errorMessage: res.errorMessage || 'Descarga cancelada.',
+                                errorMessage: res.errorMessage || t('downloads.statusCancelled'),
                             };
                         }
                         return {
@@ -482,7 +486,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             status: 'error',
                             errorCode: res.errorCode || 'UNKNOWN',
                             errorMessage:
-                                res.errorMessage || 'Ocurrió un error inesperado al descargar.',
+                                res.errorMessage || t('downloads.errorUnexpected'),
                         };
                     })
                 );
@@ -505,7 +509,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                   status: 'error',
                                   errorCode: 'UNKNOWN',
                                   errorMessage:
-                                      err?.message || 'Error inesperado durante la descarga.',
+                                      err?.message || t('downloads.errorUnexpected'),
                               }
                             : item
                     )
@@ -517,7 +521,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     processQueue();
                 }, 120);
             }
-        }, [onDownloadCompleted]);
+        }, [onDownloadCompleted, t]);
 
         useEffect(() => {
             const hasQueued = queue.some((q) => q.status === 'queued');
@@ -530,13 +534,11 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
         const handleSearchUrl = useCallback(async () => {
             const trimmed = urlInput.trim();
             if (!trimmed) {
-                setSearchError('Pega un enlace de YouTube, Instagram, TikTok, Facebook o X.');
+                setSearchError(t('downloads.errorEmptyUrl'));
                 return;
             }
             if (!detectPlatformFromUrl(trimmed)) {
-                setSearchError(
-                    'Plataforma no soportada. Usa enlaces de YouTube, Instagram, TikTok, Facebook o X.'
-                );
+                setSearchError(t('downloads.errorUnsupported'));
                 return;
             }
 
@@ -548,7 +550,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                 const info = await extractMediaInfo(trimmed);
                 if (!info.ok) {
                     setSearchError(
-                        info.errorMessage || 'No se pudo obtener información del enlace.'
+                        info.errorMessage || t('downloads.errorExtractFallback')
                     );
                     return;
                 }
@@ -557,11 +559,11 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                 }
                 setMediaInfo(info);
             } catch (err: any) {
-                setSearchError(err?.message || 'Error al analizar la URL con yt-dlp.');
+                setSearchError(err?.message || t('downloads.errorAnalyze'));
             } finally {
                 setSearching(false);
             }
-        }, [urlInput, pausePlayback]);
+        }, [urlInput, pausePlayback, t]);
 
         // Asegura permisos antes de abrir el selector o iniciar descarga; si el usuario los omitió, vuelve a pedirlos
         const runWithStoragePermission = useCallback(
@@ -634,7 +636,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                         [
                             {
                                 url: mediaInfo.url!,
-                                title: mediaInfo.title || 'Archivo descargado',
+                                title: mediaInfo.title || t('downloads.downloadedFileFallback'),
                                 thumbnail: mediaInfo.thumbnail,
                                 headers: mediaInfo.previewHeaders,
                                 directStreamUrl: mediaInfo.directStreamUrl,
@@ -644,7 +646,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     );
                 });
             },
-            [mediaInfo, runWithStoragePermission, enqueueItems]
+            [mediaInfo, runWithStoragePermission, enqueueItems, t]
         );
 
         const handleConfirmPlaylist = useCallback(
@@ -676,12 +678,12 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                               ...item,
                               status: 'cancelled',
                               errorCode: 'CANCELLED',
-                              errorMessage: 'Descarga cancelada.',
+                              errorMessage: t('downloads.statusCancelled'),
                           }
                         : item
                 )
             );
-        }, []);
+        }, [t]);
 
         const handleRetryTask = useCallback(
             (taskId: string) => {
@@ -742,7 +744,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                         >
                             <FolderLock size={18} color="#60A5FA" />
                             <Text style={styles.permBannerText}>
-                                Permiso de almacenamiento pendiente. Toca aquí para habilitarlo.
+                                {t('downloads.permBanner')}
                             </Text>
                         </TouchableOpacity>
                     )}
@@ -751,11 +753,11 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     <View style={[styles.searchRow, { backgroundColor: cardBg, borderColor: borderCol }]}>
                         <TextInput
                             style={[styles.urlInput, { color: fgColor }]}
-                            placeholder="Pega enlace de YouTube, TikTok, IG, FB o X..."
+                            placeholder={t('downloads.urlPlaceholder')}
                             placeholderTextColor={mutedColor}
                             value={urlInput}
-                            onChangeText={(t) => {
-                                setUrlInput(t);
+                            onChangeText={(val) => {
+                                setUrlInput(val);
                                 if (searchError) setSearchError(null);
                             }}
                             autoCapitalize="none"
@@ -785,7 +787,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             ) : (
                                 <>
                                     <Search size={17} color="#FFFFFF" />
-                                    <Text style={styles.searchBtnText}>Buscar</Text>
+                                    <Text style={styles.searchBtnText}>{t('common.search')}</Text>
                                 </>
                             )}
                         </TouchableOpacity>
@@ -834,10 +836,10 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                         <View style={[styles.loadingCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                             <ActivityIndicator size="large" color="#3B82F6" />
                             <Text style={[styles.loadingText, { color: fgColor }]}>
-                                Analizando enlace (motor local + respaldo)...
+                                {t('downloads.analyzingTitle')}
                             </Text>
                             <Text style={[styles.loadingSub, { color: mutedColor }]}>
-                                Extrayendo vista previa, encabezados y formatos disponibles
+                                {t('downloads.analyzingSub')}
                             </Text>
                         </View>
                     )}
@@ -862,7 +864,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                         <View style={styles.playlistPill}>
                                             <ListMusic size={12} color="#FFFFFF" />
                                             <Text style={styles.playlistPillText}>
-                                                Lista · {mediaInfo.entries?.length ?? 0} elementos
+                                                {t('downloads.playlistBadge', {
+                                                    count: mediaInfo.entries?.length ?? 0,
+                                                })}
                                             </Text>
                                         </View>
                                         <Text style={[styles.previewTitle, { color: fgColor }]} numberOfLines={2}>
@@ -877,7 +881,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 <StreamingAudioPreview
                                     streamUrl={mediaInfo.previewStreamUrl}
                                     headers={mediaInfo.previewHeaders}
-                                    title={mediaInfo.title || 'Audio'}
+                                    title={mediaInfo.title || t('common.audio')}
                                     uploader={mediaInfo.uploader || mediaInfo.platform || 'Streaming'}
                                     thumbnail={mediaInfo.thumbnail}
                                     isActive={isActive}
@@ -897,7 +901,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                         <Text style={[styles.previewUploader, { color: mutedColor }]} numberOfLines={1}>
                                             {mediaInfo.uploader} · {mediaInfo.platform}
                                             {mediaInfo.extractionSource && mediaInfo.extractionSource !== 'yt-dlp'
-                                                ? ' · Modo respaldo'
+                                                ? ` · ${t('downloads.backupMode')}`
                                                 : ''}
                                         </Text>
                                     </View>
@@ -917,7 +921,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     <Text style={[styles.previewUploader, { color: mutedColor }]} numberOfLines={1}>
                                         {mediaInfo.uploader} · {mediaInfo.platform}
                                         {mediaInfo.extractionSource && mediaInfo.extractionSource !== 'yt-dlp'
-                                            ? ' · Modo respaldo'
+                                            ? ` · ${t('downloads.backupMode')}`
                                             : ''}
                                     </Text>
                                 </View>
@@ -932,8 +936,10 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                 <Download size={20} color="#FFFFFF" />
                                 <Text style={styles.bigDownloadBtnText}>
                                     {mediaInfo.isPlaylist
-                                        ? `Descargar lista (${mediaInfo.entries?.length ?? 0})`
-                                        : 'Descargar'}
+                                        ? t('downloads.downloadPlaylistBtn', {
+                                              count: mediaInfo.entries?.length ?? 0,
+                                          })
+                                        : t('downloads.downloadBtn')}
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -943,7 +949,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     <View style={styles.queueSection}>
                         <View style={styles.queueHeaderRow}>
                             <Text style={[styles.queueHeading, { color: fgColor }]}>
-                                Cola de descargas ({queue.length})
+                                {t('downloads.queueTitle', { count: queue.length })}
                             </Text>
                             {queue.some(
                                 (q) => q.status === 'completed' || q.status === 'cancelled'
@@ -960,7 +966,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                         )
                                     }
                                 >
-                                    <Text style={styles.clearDoneText}>Limpiar historial</Text>
+                                    <Text style={styles.clearDoneText}>
+                                        {t('downloads.clearHistory')}
+                                    </Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -969,10 +977,10 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             <View style={[styles.emptyQueueCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                                 <Download size={26} color={mutedColor} />
                                 <Text style={[styles.emptyQueueTitle, { color: fgColor }]}>
-                                    Sin descargas activas
+                                    {t('downloads.emptyTitle')}
                                 </Text>
                                 <Text style={[styles.emptyQueueSub, { color: mutedColor }]}>
-                                    Pega una URL arriba, previsualiza el audio o video en streaming y pulsa Descargar.
+                                    {t('downloads.emptySub')}
                                 </Text>
                             </View>
                         ) : (
@@ -1030,8 +1038,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                                 >
                                                     {item.format.label} ·{' '}
                                                     {item.format.mediaType === 'audio'
-                                                        ? 'Audio'
-                                                        : 'Video'}
+                                                        ? t('common.audio')
+                                                        : t('common.video')}
                                                 </Text>
                                             </View>
 
@@ -1096,11 +1104,15 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                                 </View>
                                                 <View style={styles.progressLabelRow}>
                                                     <Text style={styles.downloadingStatusText}>
-                                                        Descargando... {Math.round(item.progress)}%
+                                                        {t('downloads.statusDownloading', {
+                                                            progress: Math.round(item.progress),
+                                                        })}
                                                     </Text>
                                                     {item.etaSeconds > 0 && (
                                                         <Text style={[styles.etaText, { color: mutedColor }]}>
-                                                            Restante: {formatEta(item.etaSeconds)}
+                                                            {t('downloads.remaining', {
+                                                                eta: formatEta(item.etaSeconds),
+                                                            })}
                                                         </Text>
                                                     )}
                                                 </View>
@@ -1112,7 +1124,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                             <View style={styles.statusPillRow}>
                                                 <Clock size={14} color="#60A5FA" />
                                                 <Text style={styles.queuedStatusText}>
-                                                    Esperando su turno (prioridad #{queuedPosition})
+                                                    {t('downloads.statusQueued', {
+                                                        position: queuedPosition,
+                                                    })}
                                                 </Text>
                                             </View>
                                         )}
@@ -1122,7 +1136,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                             <View style={styles.statusPillRow}>
                                                 <CheckCircle2 size={14} color="#4ADE80" />
                                                 <Text style={styles.completedStatusText} numberOfLines={1}>
-                                                    Guardado en {item.targetPath}
+                                                    {t('downloads.statusCompleted', {
+                                                        path: item.targetPath,
+                                                    })}
                                                 </Text>
                                             </View>
                                         )}
@@ -1132,7 +1148,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                             <View style={styles.statusPillRow}>
                                                 <XCircle size={14} color="#A1A1AA" />
                                                 <Text style={styles.cancelledStatusText}>
-                                                    Descarga cancelada
+                                                    {t('downloads.statusCancelled')}
                                                 </Text>
                                             </View>
                                         )}
@@ -1143,7 +1159,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                                 <AlertCircle size={15} color="#F87171" />
                                                 <Text style={styles.errorDetailText}>
                                                     {item.errorMessage ||
-                                                        'Error al descargar el archivo.'}
+                                                        t('downloads.statusErrorFallback')}
                                                 </Text>
                                             </View>
                                         )}
@@ -1170,10 +1186,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             <View style={styles.permIconCircle}>
                                 <FolderLock size={28} color="#60A5FA" />
                             </View>
-                            <Text style={styles.permTitle}>Permiso de almacenamiento</Text>
-                            <Text style={styles.permBody}>
-                                Elige una carpeta de destino (por ejemplo Música o una carpeta "Snow beats") y pulsa "Usar esta carpeta" → "Permitir" para guardar tus audios y videos descargados.
-                            </Text>
+                            <Text style={styles.permTitle}>{t('downloads.permModalTitle')}</Text>
+                            <Text style={styles.permBody}>{t('downloads.permModalBody')}</Text>
                             <TouchableOpacity
                                 style={styles.permAllowBtn}
                                 activeOpacity={0.85}
@@ -1192,7 +1206,9 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     }
                                 }}
                             >
-                                <Text style={styles.permAllowText}>Seleccionar carpeta</Text>
+                                <Text style={styles.permAllowText}>
+                                    {t('downloads.permSelectFolder')}
+                                </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.permSkipBtn}
@@ -1201,7 +1217,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                     setStoragePermModalOpen(false);
                                 }}
                             >
-                                <Text style={styles.permSkipText}>Omitir por ahora</Text>
+                                <Text style={styles.permSkipText}>{t('downloads.permSkip')}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>

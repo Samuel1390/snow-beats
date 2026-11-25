@@ -10,6 +10,7 @@ import {
 import { ChevronRight } from 'lucide-react-native';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { CollageArtwork } from '../components/CollageArtWork';
 import { TrackGroupDetail } from '../components/TrackGroupDetail';
 
@@ -35,44 +36,49 @@ const AlbumRow: React.FC<{
     fgColor: string;
     mutedColor: string;
     onSelect: (name: string) => void;
-}> = React.memo(({ item, fgColor, mutedColor, onSelect }) => (
-    <TouchableOpacity
-        style={styles.row}
-        activeOpacity={0.7}
-        onPress={() => onSelect(item.name)}
-    >
-        <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
-        <View style={styles.info}>
-            <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
-                {item.name}
-            </Text>
-            <Text style={{ color: mutedColor, fontSize: 12 }}>
-                {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
-            </Text>
-        </View>
-        <ChevronRight size={18} color={mutedColor} />
-    </TouchableOpacity>
-));
+}> = React.memo(({ item, fgColor, mutedColor, onSelect }) => {
+    const { t } = useI18n();
+    return (
+        <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => onSelect(item.name)}
+        >
+            <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
+            <View style={styles.info}>
+                <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
+                    {item.name}
+                </Text>
+                <Text style={{ color: mutedColor, fontSize: 12 }}>
+                    {item.trackCount}{' '}
+                    {item.trackCount === 1 ? t('common.songSingular') : t('common.songPlural')}
+                </Text>
+            </View>
+            <ChevronRight size={18} color={mutedColor} />
+        </TouchableOpacity>
+    );
+});
 
 export const AlbumsTab: React.FC<AlbumsTabProps> = React.memo(
     ({ tracks, onOpenPlayer, onLibraryChanged, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
+        const { t } = useI18n();
         const [openedAlbumName, setOpenedAlbumName] = useState<string | null>(null);
 
         // Agrupación O(N) en una sola pasada en memoria (~1-2ms para 1300+ pistas, sin bloquear SQLite)
         const albums = useMemo<AlbumGroup[]>(() => {
             const map = new Map<string, AlbumGroup>();
             for (let i = 0; i < tracks.length; i++) {
-                const t = tracks[i];
-                let entry = map.get(t.album);
+                const track = tracks[i];
+                let entry = map.get(track.album);
                 if (!entry) {
-                    entry = { name: t.album, trackCount: 0, recentArtworks: [], tracks: [] };
-                    map.set(t.album, entry);
+                    entry = { name: track.album, trackCount: 0, recentArtworks: [], tracks: [] };
+                    map.set(track.album, entry);
                 }
                 entry.trackCount += 1;
-                entry.tracks.push(t);
-                if (t.artworkUri && entry.recentArtworks.length < 4) {
-                    entry.recentArtworks.push(t.artworkUri);
+                entry.tracks.push(track);
+                if (track.artworkUri && entry.recentArtworks.length < 4) {
+                    entry.recentArtworks.push(track.artworkUri);
                 }
             }
             return Array.from(map.values()).sort(
@@ -157,7 +163,7 @@ export const AlbumsTab: React.FC<AlbumsTabProps> = React.memo(
                 renderItem={renderItem}
                 ListEmptyComponent={
                     <Text style={[styles.fallbackText, { color: mutedColor }]}>
-                        No hay álbumes disponibles.
+                        {t('albums.empty')}
                     </Text>
                 }
             />

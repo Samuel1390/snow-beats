@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayer, usePlayerProgress } from '../../audio-engine/PlayerContext';
 import { findActiveLyricIndex, LyricLine, ParsedLyrics } from '../../audio-engine/lyricsParser';
 import { getLyricsSurfacePalette } from '../../theme/colorContrast';
+import { useI18n } from '../../i18n';
 import { Track } from '../../types/music';
 
 interface LyricsSheetModalProps {
@@ -64,6 +65,7 @@ const SyncedLyricsList: React.FC<{
     onSeek: (sec: number) => void;
     onActiveIndexChange: (idx: number) => void;
 }> = React.memo(({ lyrics, palette, onSeek, onActiveIndexChange }) => {
+    const { t } = useI18n();
     const { position } = usePlayerProgress();
     const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
     const lineYRef = useRef<Record<number, number>>({});
@@ -108,7 +110,7 @@ const SyncedLyricsList: React.FC<{
         >
             {!lyrics.isSynced && (
                 <Text style={styles.manualNotice}>
-                    Sin marcas de tiempo · desplazamiento manual
+                    {t('lyrics.manualSheetNotice')}
                 </Text>
             )}
             {lyrics.lines.map((line: LyricLine, idx: number) => {
@@ -166,6 +168,7 @@ const SyncedLyricsList: React.FC<{
 export const LyricsSheetModal: React.FC<LyricsSheetModalProps> = React.memo(
     ({ visible, track, lyrics, onClose, onOpenShareLyrics, onOpenEditLyrics }) => {
         const { isPlaying, togglePlayPause, seekTo } = usePlayer();
+        const { t } = useI18n();
         const { height: screenHeight } = useWindowDimensions();
         const insets = useSafeAreaInsets();
         const [mounted, setMounted] = useState(visible);
@@ -336,7 +339,7 @@ export const LyricsSheetModal: React.FC<LyricsSheetModalProps> = React.memo(
                                 onPress={() => onOpenShareLyrics(activeIndexRef.current)}
                             >
                                 <Share2 size={16} color="#FFFFFF" />
-                                <Text style={styles.sharePillText}>Compartir</Text>
+                                <Text style={styles.sharePillText}>{t('common.share')}</Text>
                             </TouchableOpacity>
 
                             <LyricsMiniSeekBar onSeek={seekTo} />

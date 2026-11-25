@@ -12,6 +12,7 @@ import { ChevronRight, Folder } from 'lucide-react-native';
 import { FolderItem, getFolders, getTracksByFolder } from '../../storage/database/db';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { TrackGroupDetail } from '../components/TrackGroupDetail';
 
 interface FoldersTabProps {
@@ -26,6 +27,7 @@ interface FoldersTabProps {
 export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
     ({ tracks, onOpenPlayer, onLibraryChanged, refreshKey = 0, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
+        const { t } = useI18n();
         const [showHidden, setShowHidden] = useState(false);
         const [hiddenFolders, setHiddenFolders] = useState<FolderItem[]>([]);
         const [opened, setOpened] = useState<{ folder: FolderItem; tracks: Track[] } | null>(null);
@@ -61,7 +63,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
             async (folder: FolderItem) => {
                 if (!showHidden) {
                     const list = tracks
-                        .filter((t) => t.folderPath === folder.path)
+                        .filter((track) => track.folderPath === folder.path)
                         .sort((a, b) => a.title.localeCompare(b.title));
                     setOpened({ folder, tracks: list });
                     return;
@@ -76,7 +78,7 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
         useEffect(() => {
             if (!opened || showHidden) return;
             const list = tracks
-                .filter((t) => t.folderPath === opened.folder.path)
+                .filter((track) => track.folderPath === opened.folder.path)
                 .sort((a, b) => a.title.localeCompare(b.title));
             setOpened((prev) => (prev ? { ...prev, tracks: list } : null));
         }, [tracks, showHidden, opened?.folder.path]);
@@ -110,8 +112,12 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
             <View style={styles.container}>
                 <View style={styles.hiddenBar}>
                     <View style={{ flex: 1 }}>
-                        <Text style={[styles.hiddenTitle, { color: fgColor }]}>¿Canciones no encontradas?</Text>
-                        <Text style={{ color: mutedColor, fontSize: 12 }}>Mostrar archivos ocultos</Text>
+                        <Text style={[styles.hiddenTitle, { color: fgColor }]}>
+                            {t('folders.notFoundTitle')}
+                        </Text>
+                        <Text style={{ color: mutedColor, fontSize: 12 }}>
+                            {t('folders.showHidden')}
+                        </Text>
                     </View>
                     <Switch value={showHidden} onValueChange={setShowHidden} />
                 </View>
@@ -146,7 +152,10 @@ export const FoldersTab: React.FC<FoldersTabProps> = React.memo(
                                     {item.name}
                                 </Text>
                                 <Text style={{ color: mutedColor, fontSize: 12 }}>
-                                    {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
+                                    {item.trackCount}{' '}
+                                    {item.trackCount === 1
+                                        ? t('common.songSingular')
+                                        : t('common.songPlural')}
                                 </Text>
                             </View>
                             <ChevronRight size={18} color={mutedColor} />

@@ -14,6 +14,7 @@ import * as Sharing from 'expo-sharing';
 import { ArrowLeft, Play, Shuffle } from 'lucide-react-native';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { softDeleteTracks } from '../../storage/database/db';
 import { SongCard } from './SongCard';
@@ -43,6 +44,7 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
     onRefresh,
 }) => {
     const { fgColor, mutedColor } = useTheme();
+    const { t } = useI18n();
     const { currentTrack, isPlaying, playTrack, addToQueue } = usePlayer();
 
     const [localTracks, setLocalTracks] = useState<Track[]>(tracks);
@@ -83,7 +85,7 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
         );
     };
 
-    const selectedTracks = localTracks.filter((t) => selectedIds.includes(t.id));
+    const selectedTracks = localTracks.filter((track) => selectedIds.includes(track.id));
 
     const handlePlayAll = () => {
         if (localTracks.length === 0) return;
@@ -101,18 +103,18 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
     const handleShareSelected = async () => {
         if (selectedTracks.length === 0) return;
         if (!(await Sharing.isAvailableAsync())) {
-            Alert.alert('Compartir', 'No disponible en este dispositivo.');
+            Alert.alert(t('common.share'), t('songs.shareUnavailable'));
             return;
         }
         // expo-sharing comparte un archivo a la vez en Android
         if (selectedTracks.length > 1) {
             Alert.alert(
-                'Compartir',
-                `Android permite compartir 1 archivo por vez. Se compartirá "${selectedTracks[0].title}".`,
+                t('common.share'),
+                t('songs.shareSingleAndroid', { title: selectedTracks[0].title }),
                 [
-                    { text: 'Cancelar', style: 'cancel' },
+                    { text: t('common.cancel'), style: 'cancel' },
                     {
-                        text: 'Compartir',
+                        text: t('common.share'),
                         onPress: async () => {
                             const uri = selectedTracks[0].uri;
                             setSelectedIds([]);
@@ -131,19 +133,21 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
     const handleDeleteSelected = () => {
         if (selectedIds.length === 0) return;
         const idsToDelete = [...selectedIds];
+        const unit =
+            idsToDelete.length === 1 ? t('common.songSingular') : t('common.songPlural');
         Alert.alert(
-            'Mover a papelera',
-            `¿Mover ${idsToDelete.length} ${idsToDelete.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
+            t('songs.moveToTrashTitle'),
+            t('songs.moveToTrashConfirm', { count: idsToDelete.length, unit }),
             [
-                { text: 'Cancelar', style: 'cancel' },
+                { text: t('common.cancel'), style: 'cancel' },
                 {
-                    text: 'Mover a papelera',
+                    text: t('songs.moveToTrashTitle'),
                     style: 'destructive',
                     onPress: () => {
                         // Desactiva el selector y retira las pistas de la UI al instante (optimista)
                         const idSet = new Set(idsToDelete);
                         setSelectedIds([]);
-                        setLocalTracks((prev) => prev.filter((t) => !idSet.has(t.id)));
+                        setLocalTracks((prev) => prev.filter((track) => !idSet.has(track.id)));
                         softDeleteTracks(idsToDelete)
                             .then(() => onTracksChanged?.())
                             .catch(() => { });
@@ -171,15 +175,17 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                 onClear={() => setSelectedIds([])}
                 onToggleSelectAll={() =>
                     setSelectedIds(
-                        selectedIds.length >= localTracks.length ? [] : localTracks.map((t) => t.id)
+                        selectedIds.length >= localTracks.length
+                            ? []
+                            : localTracks.map((track) => track.id)
                     )
                 }
                 onAddToQueue={() => {
                     addToQueue(selectedTracks);
                     setSelectedIds([]);
                     Alert.alert(
-                        'Cola actualizada',
-                        `Se agregaron ${selectedTracks.length} canciones a la cola.`
+                        t('songs.queueUpdatedTitle'),
+                        t('songs.queueUpdatedBody', { count: selectedTracks.length })
                     );
                 }}
                 onAddToPlaylist={() => setPlaylistModalOpen(true)}
@@ -198,7 +204,10 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                         </Text>
                         <Text style={[styles.subtitle, { color: mutedColor }]} numberOfLines={1}>
                             {subtitle ? `${subtitle} • ` : ''}
-                            {localTracks.length} {localTracks.length === 1 ? 'canción' : 'canciones'}
+                            {localTracks.length}{' '}
+                            {localTracks.length === 1
+                                ? t('common.songSingular')
+                                : t('common.songPlural')}
                         </Text>
                     </View>
                     {localTracks.length > 0 && (
@@ -255,7 +264,7 @@ export const TrackGroupDetail: React.FC<TrackGroupDetailProps> = ({
                 }}
                 ListEmptyComponent={
                     <Text style={[styles.emptyText, { color: mutedColor }]}>
-                        No hay canciones disponibles en este grupo.
+                        {t('group.empty')}
                     </Text>
                 }
             />

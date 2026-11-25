@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { CheckSquare, ListMusic, ListPlus, Share2, Trash2, X } from 'lucide-react-native';
+import { useI18n } from '../../i18n';
 
 interface SelectionActionBarProps {
     selectedCount: number;
@@ -24,6 +25,7 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
     onShare,
     onDelete,
 }) => {
+    const { t } = useI18n();
     const visible = selectedCount > 0;
     const [mounted, setMounted] = useState(visible);
     const lastCountRef = useRef(selectedCount);
@@ -86,14 +88,17 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
                             <X size={20} color="#FFFFFF" />
                         </TouchableOpacity>
                         <Text style={styles.countText}>
-                            {displayCount} {displayCount === 1 ? 'seleccionada' : 'seleccionadas'}
+                            {displayCount}{' '}
+                            {displayCount === 1
+                                ? t('selection.selectedSingular')
+                                : t('selection.selectedPlural')}
                         </Text>
                     </View>
 
                     <TouchableOpacity onPress={onToggleSelectAll} style={styles.selectAllBtn}>
                         <CheckSquare size={16} color="#38BDF8" />
                         <Text style={styles.selectAllText}>
-                            {allSelected ? 'Quitar todo' : 'Todas'}
+                            {allSelected ? t('selection.clearAll') : t('selection.selectAll')}
                         </Text>
                     </TouchableOpacity>
                 </View>
@@ -101,22 +106,24 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
                 <View style={styles.actionsRow}>
                     <TouchableOpacity style={styles.actionBtn} onPress={onAddToQueue}>
                         <ListPlus size={19} color="#FFFFFF" />
-                        <Text style={styles.actionLabel}>A la cola</Text>
+                        <Text style={styles.actionLabel}>{t('selection.toQueue')}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.actionBtn} onPress={onAddToPlaylist}>
                         <ListMusic size={19} color="#FFFFFF" />
-                        <Text style={styles.actionLabel}>Playlist</Text>
+                        <Text style={styles.actionLabel}>{t('selection.playlist')}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.actionBtn} onPress={onShare}>
                         <Share2 size={19} color="#FFFFFF" />
-                        <Text style={styles.actionLabel}>Compartir</Text>
+                        <Text style={styles.actionLabel}>{t('selection.share')}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.actionBtn} onPress={onDelete}>
                         <Trash2 size={19} color="#F87171" />
-                        <Text style={[styles.actionLabel, { color: '#F87171' }]}>Eliminar</Text>
+                        <Text style={[styles.actionLabel, { color: '#F87171' }]}>
+                            {t('selection.delete')}
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </Animated.View>

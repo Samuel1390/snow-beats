@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, ImageBackground, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Image, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowUpDown, Play, Search, Settings, Shuffle, SkipForward } from 'lucide-react-native';
 import { ThemeConfig } from '../../types/theme';
@@ -8,7 +8,8 @@ import {
     resolveIsLightText,
     resolveThemeImageSource,
 } from '../../theme/ThemeContext';
-import { PREVIEW_TRACKS } from '../../theme/themeAssets';
+import { getThemePresetById, PREVIEW_TRACKS } from '../../theme/themeAssets';
+import { useI18n } from '../../i18n/LanguageContext';
 
 const LOGO_ASSET = require('../../../assets/images/logo.png');
 
@@ -24,6 +25,7 @@ interface ThemePreviewMockupProps {
 export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
     ({ previewTheme, variant, width = 220, height = 340, onImageLoaded }) => {
         const systemScheme = useColorScheme();
+        const { t } = useI18n();
         const isLightText = resolveIsLightText(previewTheme, systemScheme);
         const fg = isLightText ? '#FFFFFF' : '#111827';
         const muted = isLightText ? 'rgba(255,255,255,0.7)' : 'rgba(17,24,39,0.68)';
@@ -35,27 +37,35 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                 const source = resolveThemeImageSource(previewTheme, systemScheme);
                 if (source) {
                     const darkMode = resolveIsDarkMode(previewTheme.mode, systemScheme);
+                    const preset = previewTheme.customImage.presetId
+                        ? getThemePresetById(previewTheme.customImage.presetId)
+                        : null;
                     const brightness = previewTheme.customImage.brightness ?? 100;
+                    const blur = previewTheme.customImage.blur ?? 0;
                     const darkOverlay = Math.max(0, Math.min(1, 1 - brightness / 100));
-                    const isLightPreset = Boolean(previewTheme.customImage.presetId && !darkMode);
+                    const isBrightLightPreset = Boolean(preset?.lightVariantIsBright && !darkMode);
                     const scrim =
-                        isLightPreset && brightness >= 75
-                            ? 'rgba(255,255,255,0.36)'
-                            : `rgba(0,0,0,${Math.max(0.22, darkOverlay)})`;
+                        isBrightLightPreset && brightness >= 75
+                            ? 'rgba(255,255,255,0.20)'
+                            : `rgba(0,0,0,${Math.max(0.20, darkOverlay)})`;
+                    const bgImageKey = `${darkMode ? 'dark' : 'light'}-${previewTheme.customImage.presetId ?? previewTheme.customImage.uri ?? 'custom'}`;
 
                     return (
-                        <ImageBackground
-                            source={source}
-                            blurRadius={previewTheme.customImage.blur}
-                            fadeDuration={0}
-                            onLoadEnd={onImageLoaded}
-                            style={styles.fill}
-                            imageStyle={styles.fillImage}
-                            resizeMode="cover"
-                        >
-                            <View style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]} />
+                        <View style={[styles.fill, { backgroundColor: darkMode ? '#0A0A0A' : '#181C24' }]}>
+                            <Image
+                                key={bgImageKey}
+                                source={source}
+                                blurRadius={blur > 0 ? blur : undefined}
+                                onLoadEnd={onImageLoaded}
+                                style={StyleSheet.absoluteFill}
+                                resizeMode="cover"
+                            />
+                            <View
+                                pointerEvents="none"
+                                style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
+                            />
                             {children}
-                        </ImageBackground>
+                        </View>
                     );
                 }
             }
@@ -97,11 +107,11 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                             <View style={[styles.miniTabs, { borderBottomColor: borderCol }]}>
                                 <View style={[styles.miniTabActive, { borderBottomColor: fg }]}>
                                     <Text style={[styles.miniTabText, { color: fg, fontWeight: '700' }]}>
-                                        Canciones
+                                        {t('tabs.songs')}
                                     </Text>
                                 </View>
-                                <Text style={[styles.miniTabText, { color: muted }]}>Playlists</Text>
-                                <Text style={[styles.miniTabText, { color: muted }]}>Artistas</Text>
+                                <Text style={[styles.miniTabText, { color: muted }]}>{t('tabs.playlists')}</Text>
+                                <Text style={[styles.miniTabText, { color: muted }]}>{t('tabs.artists')}</Text>
                             </View>
 
                             {/* Lista de canciones reales proporcionadas */}
@@ -148,16 +158,16 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                                     style={styles.detailCover}
                                     resizeMode="cover"
                                 />
-                                <Text style={[styles.detailTitle, { color: fg }]}>Favoritas</Text>
-                                <Text style={[styles.songArtist, { color: muted }]}>5 canciones</Text>
+                                <Text style={[styles.detailTitle, { color: fg }]}>{t('theme.preview.favorites')}</Text>
+                                <Text style={[styles.songArtist, { color: muted }]}>{t('theme.preview.fiveSongs')}</Text>
                                 <View style={styles.detailActions}>
                                     <View style={[styles.detailPill, { backgroundColor: chipBg }]}>
                                         <Play size={10} color={fg} />
-                                        <Text style={[styles.detailPillText, { color: fg }]}>Reproducir</Text>
+                                        <Text style={[styles.detailPillText, { color: fg }]}>{t('theme.preview.play')}</Text>
                                     </View>
                                     <View style={[styles.detailPill, { backgroundColor: chipBg }]}>
                                         <Shuffle size={10} color={fg} />
-                                        <Text style={[styles.detailPillText, { color: fg }]}>Aleatorio</Text>
+                                        <Text style={[styles.detailPillText, { color: fg }]}>{t('theme.preview.shuffle')}</Text>
                                     </View>
                                 </View>
                             </View>

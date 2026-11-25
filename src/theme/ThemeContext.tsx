@@ -1,10 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { ImageBackground, ImageSourcePropType, StyleSheet, useColorScheme, View } from 'react-native';
+import { Image, ImageSourcePropType, StyleSheet, useColorScheme, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { DEFAULT_THEME_CONFIG, ThemeConfig } from '../types/theme';
 import { getAppSetting, setAppSetting } from '../storage/database/db';
 import { getRelativeLuminance } from './colorContrast';
-import { getPresetImageSource } from './themeAssets';
+import { getPresetImageSource, getThemePresetById } from './themeAssets';
 
 // 10 paletas planas predeterminadas (oscuro y claro)
 export const SOLID_PALETTES = [
@@ -60,8 +60,11 @@ export function resolveThemeImageSource(
 export function resolveIsLightText(theme: ThemeConfig, systemScheme: string | null | undefined): boolean {
     if (theme.backgroundType === 'image') {
         const darkMode = resolveIsDarkMode(theme.mode, systemScheme);
-        // En imagen predeterminada clara con brillo alto usamos texto oscuro sobre velo claro suave
-        if (theme.customImage?.presetId && !darkMode && (theme.customImage.brightness ?? 100) >= 75) {
+        // Solo usamos texto oscuro cuando la variante clara del fondo es realmente luminosa
+        const preset = theme.customImage?.presetId
+            ? getThemePresetById(theme.customImage.presetId)
+            : null;
+        if (preset?.lightVariantIsBright && !darkMode && (theme.customImage?.brightness ?? 100) >= 75) {
             return false;
         }
         return true;
@@ -138,25 +141,33 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
         const source = resolveThemeImageSource(theme, systemScheme);
         if (source) {
             const darkMode = resolveIsDarkMode(theme.mode, systemScheme);
-            const isLightPreset = Boolean(theme.customImage.presetId && !darkMode);
+            const preset = theme.customImage.presetId
+                ? getThemePresetById(theme.customImage.presetId)
+                : null;
+            const isBrightLightPreset = Boolean(preset?.lightVariantIsBright && !darkMode);
             const brightness = theme.customImage.brightness ?? 100;
+            const blur = theme.customImage.blur ?? 0;
             const darkOverlayOpacity = Math.max(0, Math.min(1, 1 - brightness / 100));
-            const baseScrim = isLightPreset && brightness >= 75
-                ? 'rgba(255, 255, 255, 0.36)'
-                : `rgba(0, 0, 0, ${Math.max(0.22, darkOverlayOpacity)})`;
+            const baseScrim = isBrightLightPreset && brightness >= 75
+                ? 'rgba(255, 255, 255, 0.20)'
+                : `rgba(0, 0, 0, ${Math.max(0.20, darkOverlayOpacity)})`;
+            const bgImageKey = `${darkMode ? 'dark' : 'light'}-${theme.customImage.presetId ?? theme.customImage.uri ?? 'custom'}`;
 
             return (
-                <ImageBackground
-                    source={source}
-                    blurRadius={theme.customImage.blur}
-                    fadeDuration={0}
-                    style={styles.fill}
-                    imageStyle={styles.fillImage}
-                    resizeMode="cover"
-                >
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: baseScrim }]} />
+                <View style={[styles.fill, { backgroundColor: darkMode ? '#0A0A0A' : '#181C24' }]}>
+                    <Image
+                        key={bgImageKey}
+                        source={source}
+                        blurRadius={blur > 0 ? blur : undefined}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                    />
+                    <View
+                        pointerEvents="none"
+                        style={[StyleSheet.absoluteFill, { backgroundColor: baseScrim }]}
+                    />
                     {children}
-                </ImageBackground>
+                </View>
             );
         }
     }
@@ -174,5 +185,4 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
 
 const styles = StyleSheet.create({
     fill: { flex: 1 },
-    fillImage: { width: '100%', height: '100%' },
 });

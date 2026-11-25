@@ -40,6 +40,7 @@ import {
 } from '../../audio-engine/lyricsParser';
 import { updateTrackLyrics } from '../../storage/database/db';
 import { resolveIsDarkMode, useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { Track } from '../../types/music';
 
 interface LyricsEditorModalProps {
@@ -125,6 +126,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
     }) => {
         const insets = useSafeAreaInsets();
         const { theme } = useTheme();
+        const { t } = useI18n();
         const systemScheme = useColorScheme();
         const isDark = resolveIsDarkMode(theme.mode, systemScheme);
         const ui = useMemo(() => getNeutralPalette(isDark), [isDark]);
@@ -166,11 +168,11 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                 await Linking.openURL(letrasInfo.url);
             } catch {
                 Alert.alert(
-                    'Navegador no disponible',
-                    `No se pudo abrir ${letrasInfo.displayUrl} automáticamente.`
+                    t('lyrics.browserUnavailable'),
+                    t('lyrics.browserUnavailableBody', { url: letrasInfo.displayUrl })
                 );
             }
-        }, [letrasInfo]);
+        }, [letrasInfo, t]);
 
         const handleAutoSearchLrclib = useCallback(async () => {
             setSearchingAuto(true);
@@ -183,33 +185,32 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                     track.duration
                 );
                 if (candidates.length === 0) {
-                    setAutoError(
-                        'No se encontraron coincidencias en LRCLIB. Busca en letras.com o pega la letra manualmente.'
-                    );
+                    setAutoError(t('lyrics.lrclibNotFound'));
                 } else {
                     setAutoResults(candidates);
                 }
             } catch {
-                setAutoError(
-                    'No se pudo conectar con LRCLIB (revisa tu internet). Usa letras.com o importa un archivo .lrc/.txt.'
-                );
+                setAutoError(t('lyrics.lrclibNetworkError'));
             } finally {
                 setSearchingAuto(false);
             }
-        }, [effectiveTitle, effectiveArtist, track.duration]);
+        }, [effectiveTitle, effectiveArtist, track.duration, t]);
 
-        const handleApplyCandidate = useCallback((candidate: LrclibCandidate) => {
-            const chosen = candidate.syncedLyrics || candidate.plainLyrics || '';
-            if (!chosen) return;
-            setDraftText(chosen);
-            setStatusNotice(
-                candidate.syncedLyrics
-                    ? `Cargado desde LRCLIB (.lrc sincronizada) · ${candidate.trackName}`
-                    : `Cargado desde LRCLIB (texto plano) · ${candidate.trackName}`
-            );
-            setAutoResults([]);
-            setAutoError(null);
-        }, []);
+        const handleApplyCandidate = useCallback(
+            (candidate: LrclibCandidate) => {
+                const chosen = candidate.syncedLyrics || candidate.plainLyrics || '';
+                if (!chosen) return;
+                setDraftText(chosen);
+                setStatusNotice(
+                    candidate.syncedLyrics
+                        ? t('lyrics.lrclibLoadedSynced', { track: candidate.trackName })
+                        : t('lyrics.lrclibLoadedPlain', { track: candidate.trackName })
+                );
+                setAutoResults([]);
+                setAutoError(null);
+            },
+            [t]
+        );
 
         const handleImportLyricsFile = useCallback(async () => {
             if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -222,13 +223,13 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                     try {
                         const content = (await file.text()).replace(/^\uFEFF/, '').trim();
                         if (!content) {
-                            Alert.alert('Archivo vacío', 'El archivo seleccionado no contiene texto.');
+                            Alert.alert(t('lyrics.emptyFileTitle'), t('lyrics.emptyFileBody'));
                             return;
                         }
                         setDraftText(content);
-                        setStatusNotice(`Importado: ${file.name}`);
+                        setStatusNotice(t('lyrics.importedNotice', { name: file.name }));
                     } catch {
-                        Alert.alert('Error', 'No se pudo leer el archivo seleccionado.');
+                        Alert.alert(t('common.error'), t('editTrack.importFailedBody'));
                     }
                 };
                 input.click();
@@ -241,17 +242,21 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                 if (result.cancelled) return;
                 if (!result.ok || !result.content) {
                     Alert.alert(
-                        'Importación fallida',
-                        result.errorMessage || 'No se pudo leer el archivo .lrc o .txt.'
+                        t('editTrack.importFailedTitle'),
+                        result.errorMessage || t('lyrics.readFileError')
                     );
                     return;
                 }
                 setDraftText(result.content);
-                setStatusNotice(`Importado: ${result.fileName || 'Archivo de letras'}`);
+                setStatusNotice(
+                    t('lyrics.importedNotice', {
+                        name: result.fileName || t('lyrics.importedDefaultName'),
+                    })
+                );
             } finally {
                 setImportingFile(false);
             }
-        }, []);
+        }, [t]);
 
         const handlePasteClipboard = useCallback(async () => {
             try {
@@ -263,15 +268,15 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                 }
                 const clean = pasted.replace(/^\uFEFF/, '').trim();
                 if (!clean) {
-                    Alert.alert('Portapapeles vacío', 'No hay texto copiado en el portapapeles.');
+                    Alert.alert(t('lyrics.clipboardEmptyTitle'), t('lyrics.clipboardEmptyBody'));
                     return;
                 }
                 setDraftText(clean);
-                setStatusNotice('Letra pegada desde el portapapeles.');
+                setStatusNotice(t('lyrics.pastedNotice'));
             } catch {
-                Alert.alert('Error', 'No se pudo leer el portapapeles. Pega directamente en el cuadro.');
+                Alert.alert(t('common.error'), t('lyrics.clipboardError'));
             }
-        }, []);
+        }, [t]);
 
         const handleCopyLyrics = useCallback(async () => {
             const clean = draftText.trim();
@@ -282,11 +287,11 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                 } else {
                     await copyTextToClipboard(clean);
                 }
-                setStatusNotice('Letra copiada al portapapeles.');
+                setStatusNotice(t('lyrics.copiedNotice'));
             } catch {
-                Alert.alert('Error', 'No se pudo copiar la letra.');
+                Alert.alert(t('common.error'), t('lyrics.copyError'));
             }
-        }, [draftText]);
+        }, [draftText, t]);
 
         const handleSave = useCallback(async () => {
             const cleaned = draftText.trim();
@@ -305,11 +310,11 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                 onSaved(finalText);
                 onClose();
             } catch {
-                Alert.alert('Error', 'No se pudieron guardar las letras en la base de datos local.');
+                Alert.alert(t('common.error'), t('lyrics.saveError'));
             } finally {
                 setSaving(false);
             }
-        }, [draftText, saveDirectly, track.id, onSaved, onClose]);
+        }, [draftText, saveDirectly, track.id, onSaved, onClose, t]);
 
         const handleClearLyrics = useCallback(() => {
             setDraftText('');
@@ -344,7 +349,9 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                             </TouchableOpacity>
                             <View style={styles.headerMeta}>
                                 <Text style={[styles.headerTitle, { color: ui.text }]} numberOfLines={1}>
-                                    {hadInitialLyrics ? 'Editar o reemplazar letras' : 'Agregar letras'}
+                                    {hadInitialLyrics
+                                        ? t('lyrics.editOrReplace')
+                                        : t('lyrics.addTitle')}
                                 </Text>
                                 <Text style={[styles.headerSub, { color: ui.muted }]} numberOfLines={1}>
                                     {effectiveTitle} · {effectiveArtist}
@@ -366,7 +373,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                     <>
                                         <Check size={16} color={ui.primaryText} />
                                         <Text style={[styles.saveBtnText, { color: ui.primaryText }]}>
-                                            Guardar
+                                            {t('common.save')}
                                         </Text>
                                     </>
                                 )}
@@ -389,12 +396,11 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                 <View style={styles.cardTitleRow}>
                                     <Globe size={16} color={ui.text} />
                                     <Text style={[styles.cardTitle, { color: ui.text }]}>
-                                        Buscar en letras.com
+                                        {t('lyrics.searchOnLetras')}
                                     </Text>
                                 </View>
                                 <Text style={[styles.cardHint, { color: ui.muted }]}>
-                                    Abre tu navegador en el enlace de la canción para copiar o descargar
-                                    la letra e importarla aquí.
+                                    {t('lyrics.searchOnLetrasHint')}
                                 </Text>
                                 <View style={styles.urlRow}>
                                     <View
@@ -425,7 +431,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                                 { color: ui.primaryText },
                                             ]}
                                         >
-                                            Buscar
+                                            {t('common.search')}
                                         </Text>
                                         <ExternalLink size={13} color={ui.primaryText} />
                                     </TouchableOpacity>
@@ -453,10 +459,10 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                         <Sparkles size={17} color={ui.text} />
                                     )}
                                     <Text style={[styles.actionCardTitle, { color: ui.text }]}>
-                                        Buscar auto (.lrc)
+                                        {t('lyrics.autoSearchTitle')}
                                     </Text>
                                     <Text style={[styles.actionCardSub, { color: ui.muted }]}>
-                                        Sincronizadas en LRCLIB
+                                        {t('lyrics.autoSearchSub')}
                                     </Text>
                                 </TouchableOpacity>
 
@@ -479,10 +485,10 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                         <FileUp size={17} color={ui.text} />
                                     )}
                                     <Text style={[styles.actionCardTitle, { color: ui.text }]}>
-                                        Importar archivo
+                                        {t('lyrics.importFileTitle')}
                                     </Text>
                                     <Text style={[styles.actionCardSub, { color: ui.muted }]}>
-                                        Formato .lrc o .txt
+                                        {t('lyrics.importFileSub')}
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -509,7 +515,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                     ]}
                                 >
                                     <Text style={[styles.cardTitle, { color: ui.text }]}>
-                                        Coincidencias encontradas (toca para cargar)
+                                        {t('lyrics.matchesFound')}
                                     </Text>
                                     <View style={styles.resultsList}>
                                         {autoResults.map((cand) => (
@@ -583,14 +589,18 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                 <View style={styles.editorTopRow}>
                                     <View style={styles.statusCol}>
                                         <Text style={[styles.cardTitle, { color: ui.text }]}>
-                                            Texto / archivo .lrc
+                                            {t('lyrics.textOrLrc')}
                                         </Text>
                                         <Text style={[styles.statusPillText, { color: ui.muted }]}>
                                             {parsedPreview.lines.length === 0
-                                                ? 'Sin contenido'
+                                                ? t('lyrics.emptyContent')
                                                 : parsedPreview.isSynced
-                                                ? `Sincronizada en tiempo real · ${parsedPreview.lines.length} líneas`
-                                                : `Sin tiempos · modo manual sin resaltado · ${parsedPreview.lines.length} líneas`}
+                                                ? t('lyrics.syncedPreview', {
+                                                      count: parsedPreview.lines.length,
+                                                  })
+                                                : t('lyrics.manualPreview', {
+                                                      count: parsedPreview.lines.length,
+                                                  })}
                                         </Text>
                                     </View>
                                 </View>
@@ -615,7 +625,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                                 { color: ui.secondaryText },
                                             ]}
                                         >
-                                            Pegar
+                                            {t('common.paste')}
                                         </Text>
                                     </TouchableOpacity>
 
@@ -639,7 +649,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                                         { color: ui.secondaryText },
                                                     ]}
                                                 >
-                                                    Copiar
+                                                    {t('common.copy')}
                                                 </Text>
                                             </TouchableOpacity>
 
@@ -661,7 +671,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                                         { color: ui.muted },
                                                     ]}
                                                 >
-                                                    Quitar
+                                                    {t('common.remove')}
                                                 </Text>
                                             </TouchableOpacity>
                                         </>
@@ -696,9 +706,7 @@ const LyricsEditorContent: React.FC<Omit<LyricsEditorModalProps, 'visible'>> = R
                                     ]}
                                     value={draftText}
                                     onChangeText={setDraftText}
-                                    placeholder={
-                                        'Pega aquí la letra copiada de letras.com o contenido .lrc:\n[00:12.40] Primera línea...\n[00:16.80] Segunda línea...'
-                                    }
+                                    placeholder={t('lyrics.inputPlaceholder')}
                                     placeholderTextColor={ui.muted}
                                     multiline
                                     textAlignVertical="top"

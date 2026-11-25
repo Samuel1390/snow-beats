@@ -479,3 +479,165 @@ export async function deletePlaylist(playlistId: string): Promise<void> {
   state.playlists = state.playlists.filter((p) => p.id !== playlistId);
   saveState(state);
 }
+
+// Tipos y funciones locales para Estadísticas de escucha y Alarma musical (adaptador web)
+export interface TopArtistStat {
+  artist: string;
+  totalPlays: number;
+  trackCount: number;
+  artworkUri: string | null;
+}
+
+export interface ListeningStats {
+  totalSeconds: number;
+  todaySeconds: number;
+  totalPlays: number;
+  totalTracks: number;
+  favoritesCount: number;
+  withLyricsCount: number;
+  topTracks: Track[];
+  topArtists: TopArtistStat[];
+}
+
+export interface MusicAlarm {
+  id: string;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+  days: number[];
+  label: string;
+  trackId: string | null;
+  trackTitle: string | null;
+  trackArtist: string | null;
+  fadeIn: boolean;
+}
+
+interface StoredListeningTime {
+  totalSeconds: number;
+  todayDate: string;
+  todaySeconds: number;
+}
+
+function getLocalDateKey(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function parseStoredListeningTime(raw: string | null): StoredListeningTime {
+  const todayKey = getLocalDateKey();
+  if (!raw) return { totalSeconds: 0, todayDate: todayKey, todaySeconds: 0 };
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredListeningTime>;
+    const totalSeconds = Math.max(0, Math.floor(Number(parsed.totalSeconds) || 0));
+    const sameDay = parsed.todayDate === todayKey;
+    const todaySeconds = sameDay ? Math.max(0, Math.floor(Number(parsed.todaySeconds) || 0)) : 0;
+    return { totalSeconds, todayDate: todayKey, todaySeconds };
+  } catch {
+    return { totalSeconds: 0, todayDate: todayKey, todaySeconds: 0 };
+  }
+}
+
+export async function addListeningSeconds(seconds: number): Promise<void> {
+  const delta = Math.floor(seconds);
+  if (delta <= 0) return;
+  const current = parseStoredListeningTime(await getAppSetting('listening_stats'));
+  const next: StoredListeningTime = {
+    totalSeconds: current.totalSeconds + delta,
+    todayDate: getLocalDateKey(),
+    todaySeconds: current.todaySeconds + delta,
+  };
+  await setAppSetting('listening_stats', JSON.stringify(next));
+}
+
+export async function getListeningStats(): Promise<ListeningStats> {
+  const state = loadState();
+  const timeData = parseStoredListeningTime(await getAppSetting('listening_stats'));
+  const visible = state.tracks.filter((t) => !t.isDeleted && !t.isHidden);
+
+  const totalPlays = visible.reduce((acc, t) => acc + (t.playCount || 0), 0);
+  const favoritesCount = visible.filter((t) => t.isFavorite).length;
+  const withLyricsCount = visible.filter((t) => t.hasLyrics).length;
+
+  const topTracks = visible
+    .filter((t) => t.playCount > 0)
+    .sort((a, b) => b.playCount - a.playCount || (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
+    .slice(0, 5);
+
+  const artistMap = new Map<string, TopArtistStat>();
+  for (const t of visible) {
+    const entry = artistMap.get(t.artist) ?? {
+      artist: t.artist,
+      totalPlays: 0,
+      trackCount: 0,
+      artworkUri: null,
+    };
+    entry.totalPlays += t.playCount || 0;
+    entry.trackCount += 1;
+    if (!entry.artworkUri && t.artworkUri) entry.artworkUri = t.artworkUri;
+    artistMap.set(t.artist, entry);
+  }
+
+  const topArtists = Array.from(artistMap.values())
+    .filter((a) => a.totalPlays > 0)
+    .sort((a, b) => b.totalPlays - a.totalPlays || b.trackCount - a.trackCount)
+    .slice(0, 5);
+
+  return {
+    totalSeconds: timeData.totalSeconds,
+    todaySeconds: timeData.todaySeconds,
+    totalPlays,
+    totalTracks: visible.length,
+    favoritesCount,
+    withLyricsCount,
+    topTracks,
+    topArtists,
+  };
+}
+
+export async function resetListeningStats(): Promise<void> {
+  const state = loadState();
+  const empty: StoredListeningTime = {
+    totalSeconds: 0,
+    todayDate: getLocalDateKey(),
+    todaySeconds: 0,
+  };
+  state.appSettings['listening_stats'] = JSON.stringify(empty);
+  state.tracks = state.tracks.map((t) => ({ ...t, playCount: 0, lastPlayedAt: 0 }));
+  saveState(state);
+}
+
+export async function getMusicAlarms(): Promise<MusicAlarm[]> {
+  const raw = await getAppSetting('music_alarms');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item.id === 'string')
+      .map((item) => ({
+        id: String(item.id),
+        hour: Math.max(0, Math.min(23, Math.floor(Number(item.hour) || 0))),
+        minute: Math.max(0, Math.min(59, Math.floor(Number(item.minute) || 0))),
+        enabled: Boolean(item.enabled),
+        days: Array.isArray(item.days)
+          ? item.days
+              .map((d: unknown) => Number(d))
+              .filter((d: number) => Number.isInteger(d) && d >= 0 && d <= 6)
+          : [],
+        label: typeof item.label === 'string' ? item.label : '',
+        trackId: typeof item.trackId === 'string' ? item.trackId : null,
+        trackTitle: typeof item.trackTitle === 'string' ? item.trackTitle : null,
+        trackArtist: typeof item.trackArtist === 'string' ? item.trackArtist : null,
+        fadeIn: item.fadeIn !== false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveMusicAlarms(alarms: MusicAlarm[]): Promise<void> {
+  await setAppSetting('music_alarms', JSON.stringify(alarms));
+}

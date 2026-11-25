@@ -47,6 +47,7 @@ import {
 } from '../../audio-engine/lyricsParser';
 import { saveEditedTrackData } from '../../storage/database/db';
 import { resolveIsDarkMode, useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { Track } from '../../types/music';
 import { LyricsEditorModal } from './LyricsEditorModal';
 
@@ -128,6 +129,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
         const insets = useSafeAreaInsets();
         const { width: screenWidth } = useWindowDimensions();
         const { theme } = useTheme();
+        const { t } = useI18n();
         const systemScheme = useColorScheme();
         const isDark = resolveIsDarkMode(theme.mode, systemScheme);
         const ui = useMemo(() => getNeutralPalette(isDark), [isDark]);
@@ -200,10 +202,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 if (Platform.OS !== 'web') {
                     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
                     if (!perm.granted) {
-                        Alert.alert(
-                            'Permiso requerido',
-                            'Permite el acceso a tu galería para elegir y recortar la carátula 1:1.'
-                        );
+                        Alert.alert(t('editTrack.permTitle'), t('editTrack.permBody'));
                         return;
                     }
                 }
@@ -216,11 +215,11 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 if (picked.canceled || !picked.assets?.[0]?.uri) return;
                 setCoverUri(picked.assets[0].uri);
                 setCoverChanged(true);
-                setCoverNotice('Carátula recortada desde galería (1:1).');
+                setCoverNotice(t('editTrack.coverCroppedNotice'));
             } catch {
-                Alert.alert('Error', 'No se pudo abrir la galería de imágenes.');
+                Alert.alert(t('common.error'), t('editTrack.galleryError'));
             }
-        }, []);
+        }, [t]);
 
         // Pega una imagen o enlace de imagen copiado en el portapapeles
         const handlePasteCover = useCallback(async () => {
@@ -235,12 +234,12 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                     ) {
                         setCoverUri(text);
                         setCoverChanged(true);
-                        setCoverNotice('Imagen pegada desde el portapapeles.');
+                        setCoverNotice(t('editTrack.coverPastedNotice'));
                         return;
                     }
                     Alert.alert(
-                        'Portapapeles sin imagen',
-                        'Copia una URL de imagen válida o pégala manualmente en el campo de enlace.'
+                        t('editTrack.clipboardNoImageTitle'),
+                        t('editTrack.clipboardNoImageWeb')
                     );
                     return;
                 }
@@ -248,9 +247,8 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 const res = await readClipboardImage();
                 if (!res.ok || !res.uri) {
                     Alert.alert(
-                        'No se encontró imagen',
-                        res.errorMessage ||
-                            'Copia una imagen o un enlace de imagen válido antes de pulsar Pegar.'
+                        t('editTrack.noImageFoundTitle'),
+                        res.errorMessage || t('editTrack.noImageFoundBody')
                     );
                     return;
                 }
@@ -258,38 +256,38 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 setCoverChanged(true);
                 setCoverNotice(
                     res.source === 'clipboard_image'
-                        ? 'Imagen pegada desde el portapapeles (se ajustará a 1:1 al guardar).'
-                        : 'Enlace de imagen pegado (se descargará y ajustará a 1:1 al guardar).'
+                        ? t('editTrack.coverPastedClipNotice')
+                        : t('editTrack.coverPastedUrlNotice')
                 );
             } catch {
-                Alert.alert('Error', 'No se pudo leer la imagen del portapapeles.');
+                Alert.alert(t('common.error'), t('editTrack.clipboardReadError'));
             } finally {
                 setPastingImage(false);
             }
-        }, []);
+        }, [t]);
 
         // Copia la carátula actual al portapapeles para poder pegarla en otra canción
         const handleCopyCover = useCallback(async () => {
             if (!coverUri) {
-                Alert.alert('Sin carátula', 'Esta canción no tiene carátula para copiar.');
+                Alert.alert(t('editTrack.noCoverTitle'), t('editTrack.noCoverBody'));
                 return;
             }
             try {
                 if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
                     await navigator.clipboard.writeText(coverUri);
-                    setCoverNotice('Enlace de carátula copiado al portapapeles.');
+                    setCoverNotice(t('editTrack.coverLinkCopied'));
                     return;
                 }
                 const copied = await copyImageToClipboard(coverUri);
                 if (copied) {
-                    setCoverNotice('Carátula copiada al portapapeles.');
+                    setCoverNotice(t('editTrack.coverCopied'));
                 } else {
-                    Alert.alert('Error', 'No se pudo copiar la carátula al portapapeles.');
+                    Alert.alert(t('common.error'), t('editTrack.coverCopyError'));
                 }
             } catch {
-                Alert.alert('Error', 'No se pudo copiar la carátula.');
+                Alert.alert(t('common.error'), t('editTrack.coverCopyError'));
             }
-        }, [coverUri]);
+        }, [coverUri, t]);
 
         // Aplica una URL o ruta pegada manualmente en el campo de texto
         const handleApplyManualImageUrl = useCallback(() => {
@@ -301,17 +299,14 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 !clean.startsWith('file://') &&
                 !clean.startsWith('content://')
             ) {
-                Alert.alert(
-                    'Enlace no válido',
-                    'Ingresa o pega una URL válida (https://..., data:image/..., file://...).'
-                );
+                Alert.alert(t('editTrack.invalidLinkTitle'), t('editTrack.invalidLinkBody'));
                 return;
             }
             setCoverUri(clean);
             setCoverChanged(true);
             setManualUrlOpen(false);
-            setCoverNotice('Imagen manual cargada (se recortará a 1:1 al guardar).');
-        }, [manualImageUrl]);
+            setCoverNotice(t('editTrack.manualImageNotice'));
+        }, [manualImageUrl, t]);
 
         const handleResetCover = useCallback(() => {
             setCoverUri(track.artworkUri);
@@ -324,9 +319,12 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
             try {
                 await Linking.openURL(letrasInfo.url);
             } catch {
-                Alert.alert('Error', `No se pudo abrir ${letrasInfo.displayUrl}.`);
+                Alert.alert(
+                    t('common.error'),
+                    t('editTrack.openUrlError', { url: letrasInfo.displayUrl })
+                );
             }
-        }, [letrasInfo]);
+        }, [letrasInfo, t]);
 
         const handleQuickImportFile = useCallback(async () => {
             if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -350,8 +348,8 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 if (res.cancelled) return;
                 if (!res.ok || !res.content) {
                     Alert.alert(
-                        'Importación fallida',
-                        res.errorMessage || 'No se pudo leer el archivo seleccionado.'
+                        t('editTrack.importFailedTitle'),
+                        res.errorMessage || t('editTrack.importFailedBody')
                     );
                     return;
                 }
@@ -359,11 +357,11 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
             } finally {
                 setImportingFile(false);
             }
-        }, []);
+        }, [t]);
 
         const handleSaveAll = useCallback(async () => {
-            const cleanTitle = title.trim() || track.title || 'Sin título';
-            const cleanArtist = artist.trim() || 'Artista desconocido';
+            const cleanTitle = title.trim() || track.title || t('common.untitled');
+            const cleanArtist = artist.trim() || t('common.unknownArtist');
             const cleanLyrics = lyricsText.trim();
 
             setSaving(true);
@@ -382,8 +380,8 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                         coverUri.startsWith('data:image/')
                     ) {
                         Alert.alert(
-                            'Imagen no válida',
-                            'No se pudo descargar o decodificar la imagen pegada. Verifica el enlace o elige otra imagen.'
+                            t('editTrack.invalidImageTitle'),
+                            t('editTrack.invalidImageBody')
                         );
                         setSaving(false);
                         return;
@@ -413,7 +411,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                 });
                 onClose();
             } catch {
-                Alert.alert('Error', 'No se pudieron guardar los cambios de la canción.');
+                Alert.alert(t('common.error'), t('editTrack.saveError'));
             } finally {
                 setSaving(false);
             }
@@ -428,6 +426,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
             track.title,
             onSaved,
             onClose,
+            t,
         ]);
 
         return (
@@ -457,7 +456,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                 <X size={21} color={ui.text} />
                             </TouchableOpacity>
                             <Text style={[styles.headerTitle, { color: ui.text }]}>
-                                Editar datos
+                                {t('editTrack.title')}
                             </Text>
                             <TouchableOpacity
                                 style={[
@@ -475,7 +474,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                     <>
                                         <Check size={16} color={ui.primaryText} />
                                         <Text style={[styles.saveChipText, { color: ui.primaryText }]}>
-                                            Guardar
+                                            {t('common.save')}
                                         </Text>
                                     </>
                                 )}
@@ -538,7 +537,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                     { color: ui.primaryText },
                                                 ]}
                                             >
-                                                Galería (recorte 1:1)
+                                                {t('editTrack.galleryCrop')}
                                             </Text>
                                         </View>
                                     </TouchableOpacity>
@@ -568,7 +567,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                     { color: ui.secondaryText },
                                                 ]}
                                             >
-                                                Pegar imagen
+                                                {t('editTrack.pasteImage')}
                                             </Text>
                                         </TouchableOpacity>
 
@@ -592,7 +591,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                     { color: ui.secondaryText },
                                                 ]}
                                             >
-                                                Copiar
+                                                {t('common.copy')}
                                             </Text>
                                         </TouchableOpacity>
 
@@ -629,7 +628,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                     },
                                                 ]}
                                             >
-                                                Pegar URL
+                                                {t('editTrack.pasteUrl')}
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
@@ -648,7 +647,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                 ]}
                                                 value={manualImageUrl}
                                                 onChangeText={setManualImageUrl}
-                                                placeholder="https://... o data:image/..."
+                                                placeholder={t('editTrack.urlPlaceholder')}
                                                 placeholderTextColor={ui.muted}
                                                 autoCapitalize="none"
                                                 autoCorrect={false}
@@ -669,7 +668,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                         { color: ui.primaryText },
                                                     ]}
                                                 >
-                                                    Aplicar
+                                                    {t('common.apply')}
                                                 </Text>
                                             </TouchableOpacity>
                                         </View>
@@ -693,7 +692,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                             <Text
                                                 style={[styles.resetCoverText, { color: ui.pillText }]}
                                             >
-                                                Restaurar carátula original
+                                                {t('editTrack.restoreCover')}
                                             </Text>
                                         </TouchableOpacity>
                                     )}
@@ -711,14 +710,14 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                     <View style={styles.fieldLabelRow}>
                                         <Pencil size={13} color={ui.muted} />
                                         <Text style={[styles.fieldLabel, { color: ui.muted }]}>
-                                            Título
+                                            {t('editTrack.songTitleLabel')}
                                         </Text>
                                     </View>
                                     <TextInput
                                         style={[styles.titleInput, { color: ui.text }]}
                                         value={title}
                                         onChangeText={setTitle}
-                                        placeholder="Título de la canción"
+                                        placeholder={t('editTrack.songTitlePlaceholder')}
                                         placeholderTextColor={ui.muted}
                                         returnKeyType="next"
                                     />
@@ -730,14 +729,14 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                     <View style={styles.fieldLabelRow}>
                                         <Pencil size={13} color={ui.muted} />
                                         <Text style={[styles.fieldLabel, { color: ui.muted }]}>
-                                            Artista
+                                            {t('editTrack.artistLabel')}
                                         </Text>
                                     </View>
                                     <TextInput
                                         style={[styles.artistInput, { color: ui.text }]}
                                         value={artist}
                                         onChangeText={setArtist}
-                                        placeholder="Nombre del artista"
+                                        placeholder={t('editTrack.artistPlaceholder')}
                                         placeholderTextColor={ui.muted}
                                         returnKeyType="done"
                                     />
@@ -756,7 +755,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                         <FileText size={18} color={ui.text} />
                                         <View style={styles.flexOne}>
                                             <Text style={[styles.lyricsHeading, { color: ui.text }]}>
-                                                Letras
+                                                {t('editTrack.lyricsTitle')}
                                             </Text>
                                             <Text
                                                 style={[styles.lyricsStatus, { color: ui.muted }]}
@@ -764,9 +763,13 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                             >
                                                 {hasDraftLyrics
                                                     ? parsedDraftLyrics.isSynced
-                                                        ? `Sincronizada (.lrc) · ${parsedDraftLyrics.lines.length} líneas`
-                                                        : `Manual sin resaltado · ${parsedDraftLyrics.lines.length} líneas`
-                                                    : 'Sin letras asociadas'}
+                                                        ? t('editTrack.lyricsSyncedStatus', {
+                                                              count: parsedDraftLyrics.lines.length,
+                                                          })
+                                                        : t('editTrack.lyricsManualStatus', {
+                                                              count: parsedDraftLyrics.lines.length,
+                                                          })
+                                                    : t('editTrack.lyricsEmptyStatus')}
                                             </Text>
                                         </View>
                                     </View>
@@ -786,7 +789,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                 { color: ui.primaryText },
                                             ]}
                                         >
-                                            {hasDraftLyrics ? 'Editar' : 'Agregar'}
+                                            {hasDraftLyrics ? t('common.edit') : t('common.add')}
                                         </Text>
                                     </TouchableOpacity>
                                 </View>
@@ -821,7 +824,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                 { color: ui.primaryText },
                                             ]}
                                         >
-                                            Buscar
+                                            {t('common.search')}
                                         </Text>
                                         <ExternalLink size={12} color={ui.primaryText} />
                                     </TouchableOpacity>
@@ -852,7 +855,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                 { color: ui.secondaryText },
                                             ]}
                                         >
-                                            Importar .lrc / .txt
+                                            {t('editTrack.importFile')}
                                         </Text>
                                     </TouchableOpacity>
 
@@ -874,7 +877,7 @@ const EditTrackContent: React.FC<Omit<EditTrackModalProps, 'visible'>> = React.m
                                                 { color: ui.secondaryText },
                                             ]}
                                         >
-                                            LRCLIB / Pegar texto
+                                            {t('editTrack.lrclibOrPaste')}
                                         </Text>
                                     </TouchableOpacity>
                                 </View>

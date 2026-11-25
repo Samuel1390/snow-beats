@@ -46,6 +46,9 @@ import {
 import { sendEmailWithAttachments } from '../../../modules/snow-metadata';
 import { Track } from '../../types/music';
 import { ThemeSettingsView } from '../components/ThemeSettingsView';
+import { StatsAndAlarmView } from '../components/StatsAndAlarmView';
+import { useI18n } from '../../i18n/LanguageContext';
+import { usePlayer } from '../../audio-engine/PlayerContext';
 
 type SettingsSection =
     | 'theme'
@@ -60,6 +63,7 @@ type SettingsSection =
 interface SettingsModalProps {
     visible: boolean;
     onClose: () => void;
+    onOpenPlayer?: () => void;
 }
 
 function escapeHtml(raw: string): string {
@@ -71,46 +75,54 @@ function escapeHtml(raw: string): string {
         .replace(/'/g, '&#39;');
 }
 
-function buildBugReportHtml(description: string, imageCount: number): string {
+function buildBugReportHtml(
+    description: string,
+    imageCount: number,
+    localeTag: string,
+    isEnglish: boolean
+): string {
     const safeBody = escapeHtml(description).replace(/\n/g, '<br/>');
     const osInfo = `${Platform.OS === 'android' ? 'Android' : Platform.OS} ${String(Platform.Version)}`;
-    const dateStr = new Date().toLocaleString('es-ES');
-    const attachText =
-        imageCount > 0
-            ? `${imageCount} ${imageCount === 1 ? 'imagen adjunta' : 'imágenes adjuntas'}`
-            : 'Sin imágenes adjuntas';
+    const dateStr = new Date().toLocaleString(localeTag);
+    const attachText = isEnglish
+        ? imageCount > 0
+            ? `${imageCount} ${imageCount === 1 ? 'attached image' : 'attached images'}`
+            : 'No attached images'
+        : imageCount > 0
+        ? `${imageCount} ${imageCount === 1 ? 'imagen adjunta' : 'imágenes adjuntas'}`
+        : 'Sin imágenes adjuntas';
 
     return `<!DOCTYPE html>
 <html>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #111827; line-height: 1.5; margin: 0; padding: 0;">
   <div style="max-width: 600px; margin: 0 auto; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden;">
     <div style="background-color: #0F172A; color: #FFFFFF; padding: 18px 22px;">
-      <h2 style="margin: 0; font-size: 19px; letter-spacing: 0.2px;">Snow Beats — Reporte de problema</h2>
-      <p style="margin: 4px 0 0 0; font-size: 12px; color: #93C5FD;">Enviado desde la aplicación móvil</p>
+      <h2 style="margin: 0; font-size: 19px; letter-spacing: 0.2px;">Snow Beats — ${isEnglish ? 'Issue Report' : 'Reporte de problema'}</h2>
+      <p style="margin: 4px 0 0 0; font-size: 12px; color: #93C5FD;">${isEnglish ? 'Sent from mobile app' : 'Enviado desde la aplicación móvil'}</p>
     </div>
     <div style="padding: 20px 22px; background-color: #FFFFFF;">
-      <h3 style="margin: 0 0 8px 0; font-size: 14px; color: #1E3A8A; text-transform: uppercase;">Descripción del fallo</h3>
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; color: #1E3A8A; text-transform: uppercase;">${isEnglish ? 'Issue description' : 'Descripción del fallo'}</h3>
       <div style="background-color: #F8FAFC; border-left: 4px solid #1E3A8A; padding: 12px 14px; border-radius: 6px; font-size: 14px; color: #111827;">
         ${safeBody}
       </div>
       <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0;" />
-      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Aplicación:</b> Snow Beats v0.1.0</p>
-      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Sistema:</b> ${escapeHtml(osInfo)}</p>
-      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>Adjuntos:</b> ${escapeHtml(attachText)}</p>
-      <p style="margin: 0; font-size: 13px; color: #374151;"><b>Fecha:</b> ${escapeHtml(dateStr)}</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>${isEnglish ? 'App' : 'Aplicación'}:</b> Snow Beats v0.1.0</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>${isEnglish ? 'System' : 'Sistema'}:</b> ${escapeHtml(osInfo)}</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #374151;"><b>${isEnglish ? 'Attachments' : 'Adjuntos'}:</b> ${escapeHtml(attachText)}</p>
+      <p style="margin: 0; font-size: 13px; color: #374151;"><b>${isEnglish ? 'Date' : 'Fecha'}:</b> ${escapeHtml(dateStr)}</p>
     </div>
   </div>
 </body>
 </html>`;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible, onClose, onOpenPlayer }) => {
     const { theme } = useTheme();
+    const { language, localeTag, supportedLanguages, setLanguage, t } = useI18n();
+    const { sleepMinutes, setSleepTimerMinutes, alarms, playTrack } = usePlayer();
     const insets = useSafeAreaInsets();
     const { width: screenWidth } = useWindowDimensions();
     const [activeSection, setActiveSection] = useState<SettingsSection | null>(null);
-    const [language, setLanguage] = useState<'es' | 'en'>('es');
-    const [sleepMinutes, setSleepMinutes] = useState<number>(0);
     const [trash, setTrash] = useState<Track[]>([]);
     const [bugReport, setBugReport] = useState('');
     const [reportImages, setReportImages] = useState<string[]>([]);
@@ -194,7 +206,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     const handlePickReportImages = async () => {
         const remaining = 5 - reportImages.length;
         if (remaining <= 0) {
-            Alert.alert('Límite alcanzado', 'Puedes adjuntar un máximo de 5 imágenes por reporte.');
+            Alert.alert(t('settings.report.limitTitle'), t('settings.report.limitBody'));
             return;
         }
         try {
@@ -209,7 +221,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                 setReportImages((prev) => [...prev, ...pickedUris].slice(0, 5));
             }
         } catch {
-            Alert.alert('Imágenes', 'No se pudo abrir la galería para seleccionar capturas.');
+            Alert.alert(t('settings.report.galleryErrorTitle'), t('settings.report.galleryErrorBody'));
         }
     };
 
@@ -218,18 +230,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     };
 
     const sendBugReport = async () => {
-        const description = bugReport.trim() || 'Sin descripción adicional.';
-        const subject = 'Snow Beats - Reporte de problema';
+        const description = bugReport.trim() || t('settings.report.defaultDesc');
+        const subject = t('settings.report.emailSubject');
+        const isEnglish = language === 'en';
         const plainBody = [
-            'SNOW BEATS — REPORTE DE PROBLEMA',
+            isEnglish ? 'SNOW BEATS — ISSUE REPORT' : 'SNOW BEATS — REPORTE DE PROBLEMA',
             '----------------------------------',
             description,
             '',
-            `Aplicación: Snow Beats v0.1.0`,
-            `Sistema: ${Platform.OS} ${String(Platform.Version)}`,
-            `Imágenes adjuntas: ${reportImages.length}`,
+            `${isEnglish ? 'App' : 'Aplicación'}: Snow Beats v0.1.0`,
+            `${isEnglish ? 'System' : 'Sistema'}: ${Platform.OS} ${String(Platform.Version)}`,
+            `${isEnglish ? 'Attached images' : 'Imágenes adjuntas'}: ${reportImages.length}`,
         ].join('\n');
-        const htmlBody = buildBugReportHtml(description, reportImages.length);
+        const htmlBody = buildBugReportHtml(description, reportImages.length, localeTag, isEnglish);
 
         if (Platform.OS === 'android') {
             const launched = await sendEmailWithAttachments(
@@ -240,10 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                 reportImages
             );
             if (launched) return;
-            Alert.alert(
-                'Correo no disponible',
-                'No se encontró una aplicación de correo instalada para enviar el reporte a snelo1390@gmail.com.'
-            );
+            Alert.alert(t('settings.report.noMailTitle'), t('settings.report.noMailBody'));
             return;
         }
 
@@ -273,12 +283,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
         setSavedVideoPath(restored.videoPath);
     };
 
+    const modeLabel =
+        theme.mode === 'dark'
+            ? t('theme.mode.dark')
+            : theme.mode === 'light'
+            ? t('theme.mode.light')
+            : t('theme.mode.system');
+
     const themeSubtitle =
         theme.backgroundType === 'image'
-            ? 'Imagen personalizada'
+            ? t('settings.theme.customImage')
             : theme.backgroundType === 'gradient'
-            ? 'Gradiente'
-            : `${theme.mode === 'dark' ? 'Oscuro' : theme.mode === 'light' ? 'Claro' : 'Sistema'} · Color sólido`;
+            ? t('settings.theme.gradient')
+            : t('settings.theme.solidSubtitle', { mode: modeLabel });
+
+    const activeAlarmCount = alarms.filter((a) => a.enabled).length;
+    const currentLanguageMeta = supportedLanguages.find((item) => item.code === language);
 
     const menuItems: {
         key: SettingsSection;
@@ -289,59 +309,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
     }[] = [
         {
             key: 'theme',
-            title: 'Tema',
+            title: t('settings.theme.title'),
             subtitle: themeSubtitle,
             Icon: Palette,
             iconBg: '#1D4ED8',
         },
         {
             key: 'download_paths',
-            title: 'Ruta de descarga',
-            subtitle: 'Carpetas de audio y video',
+            title: t('settings.paths.title'),
+            subtitle: t('settings.paths.subtitle'),
             Icon: FolderDown,
             iconBg: '#0284C7',
         },
         {
             key: 'timer',
-            title: 'Temporizador de apagado',
-            subtitle: sleepMinutes === 0 ? 'Desactivado' : `${sleepMinutes} minutos`,
+            title: t('settings.timer.title'),
+            subtitle:
+                sleepMinutes === 0
+                    ? t('settings.timer.off')
+                    : t('settings.timer.minutes', { min: sleepMinutes }),
             Icon: Timer,
             iconBg: '#6D28D9',
         },
         {
             key: 'stats',
-            title: 'Estadísticas y Alarma',
-            subtitle: 'Tiempo reproducido y alarma musical',
+            title: t('settings.stats.title'),
+            subtitle:
+                activeAlarmCount > 0
+                    ? t('settings.stats.subtitleActiveAlarms', {
+                          count: activeAlarmCount,
+                          unit: t('alarm.activeUnit'),
+                      })
+                    : t('settings.stats.subtitle'),
             Icon: BarChart3,
             iconBg: '#0F766E',
         },
         {
             key: 'trash',
-            title: 'Eliminados recientemente',
+            title: t('settings.trash.title'),
             subtitle:
                 trash.length === 0
-                    ? 'Papelera vacía'
-                    : `${trash.length} ${trash.length === 1 ? 'canción' : 'canciones'}`,
+                    ? t('settings.trash.emptySubtitle')
+                    : `${trash.length} ${
+                          trash.length === 1 ? t('common.songSingular') : t('common.songPlural')
+                      }`,
             Icon: Trash2,
             iconBg: '#B91C1C',
         },
         {
             key: 'language',
-            title: 'Idioma',
-            subtitle: language === 'es' ? 'Español' : 'English',
+            title: t('settings.language.title'),
+            subtitle: currentLanguageMeta?.nativeName ?? 'Español',
             Icon: Globe,
             iconBg: '#0369A1',
         },
         {
             key: 'report',
-            title: 'Reportar problema',
-            subtitle: 'Enviar correo al desarrollador',
+            title: t('settings.report.title'),
+            subtitle: t('settings.report.subtitle'),
             Icon: Mail,
             iconBg: '#B45309',
         },
         {
             key: 'about',
-            title: 'Acerca de',
+            title: t('settings.about.title'),
             subtitle: 'Snow Beats v0.1.0',
             Icon: Info,
             iconBg: '#3F3F46',
@@ -381,69 +412,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                     style={{ flex: 1 }}
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 >
-                    {renderSubHeader('Ruta de descarga')}
-                        <ScrollView
-                            contentContainerStyle={styles.subContent}
-                            keyboardShouldPersistTaps="handled"
+                    {renderSubHeader(t('settings.paths.title'))}
+                    <ScrollView
+                        contentContainerStyle={styles.subContent}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        <Text style={styles.subDescription}>
+                            {t('settings.paths.description')}
+                        </Text>
+
+                        <View style={styles.pathCard}>
+                            <Text style={styles.pathLabel}>{t('settings.paths.audioFolder')}</Text>
+                            <TextInput
+                                style={styles.pathInput}
+                                value={audioDownloadPath}
+                                onChangeText={setAudioDownloadPath}
+                                placeholder={DEFAULT_AUDIO_DOWNLOAD_PATH}
+                                placeholderTextColor="#71717A"
+                                autoCorrect={false}
+                            />
+                        </View>
+
+                        <View style={styles.pathCard}>
+                            <Text style={styles.pathLabel}>{t('settings.paths.videoFolder')}</Text>
+                            <TextInput
+                                style={styles.pathInput}
+                                value={videoDownloadPath}
+                                onChangeText={setVideoDownloadPath}
+                                placeholder={DEFAULT_VIDEO_DOWNLOAD_PATH}
+                                placeholderTextColor="#71717A"
+                                autoCorrect={false}
+                            />
+                        </View>
+
+                        <TouchableOpacity
+                            style={[
+                                styles.primaryBtn,
+                                !hasUnsavedPathChanges && styles.primaryBtnSaved,
+                            ]}
+                            disabled={!hasUnsavedPathChanges}
+                            activeOpacity={0.85}
+                            onPress={handleSaveDownloadPaths}
                         >
-                            <Text style={styles.subDescription}>
-                                Configura las carpetas dentro del almacenamiento interno donde Snow Beats guardará tus descargas de audio y video.
-                            </Text>
-
-                            <View style={styles.pathCard}>
-                                <Text style={styles.pathLabel}>Carpeta de audio</Text>
-                                <TextInput
-                                    style={styles.pathInput}
-                                    value={audioDownloadPath}
-                                    onChangeText={setAudioDownloadPath}
-                                    placeholder={DEFAULT_AUDIO_DOWNLOAD_PATH}
-                                    placeholderTextColor="#71717A"
-                                    autoCorrect={false}
-                                />
-                            </View>
-
-                            <View style={styles.pathCard}>
-                                <Text style={styles.pathLabel}>Carpeta de video</Text>
-                                <TextInput
-                                    style={styles.pathInput}
-                                    value={videoDownloadPath}
-                                    onChangeText={setVideoDownloadPath}
-                                    placeholder={DEFAULT_VIDEO_DOWNLOAD_PATH}
-                                    placeholderTextColor="#71717A"
-                                    autoCorrect={false}
-                                />
-                            </View>
-
-                            <TouchableOpacity
+                            <Check
+                                size={18}
+                                color={hasUnsavedPathChanges ? '#000000' : '#4ADE80'}
+                            />
+                            <Text
                                 style={[
-                                    styles.primaryBtn,
-                                    !hasUnsavedPathChanges && styles.primaryBtnSaved,
+                                    styles.primaryBtnText,
+                                    !hasUnsavedPathChanges && styles.primaryBtnTextSaved,
                                 ]}
-                                disabled={!hasUnsavedPathChanges}
-                                activeOpacity={0.85}
-                                onPress={handleSaveDownloadPaths}
                             >
-                                <Check
-                                    size={18}
-                                    color={hasUnsavedPathChanges ? '#000000' : '#4ADE80'}
-                                />
-                                <Text
-                                    style={[
-                                        styles.primaryBtnText,
-                                        !hasUnsavedPathChanges && styles.primaryBtnTextSaved,
-                                    ]}
-                                >
-                                    {hasUnsavedPathChanges ? 'Guardar rutas' : 'Rutas guardadas'}
-                                </Text>
-                            </TouchableOpacity>
+                                {hasUnsavedPathChanges
+                                    ? t('settings.paths.saveBtn')
+                                    : t('settings.paths.savedBtn')}
+                            </Text>
+                        </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={styles.secondaryBtn}
-                                onPress={handleResetDownloadPaths}
-                            >
-                                <RotateCcw size={16} color="#E4E4E7" />
-                                <Text style={styles.secondaryBtnText}>Restaurar rutas predeterminadas</Text>
-                            </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.secondaryBtn}
+                            onPress={handleResetDownloadPaths}
+                        >
+                            <RotateCcw size={16} color="#E4E4E7" />
+                            <Text style={styles.secondaryBtnText}>
+                                {t('settings.paths.resetBtn')}
+                            </Text>
+                        </TouchableOpacity>
                     </ScrollView>
                 </KeyboardAvoidingView>
             );
@@ -451,97 +486,92 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
         if (activeSection === 'timer') {
             return (
                 <>
-                    {renderSubHeader('Temporizador de apagado')}
-                        <ScrollView contentContainerStyle={styles.subContent}>
-                            <Text style={styles.subDescription}>
-                                Detiene la reproducción automáticamente al finalizar el tiempo seleccionado.
-                            </Text>
-                            {[0, 15, 30, 45, 60, 90].map((min) => {
-                                const active = sleepMinutes === min;
-                                return (
-                                    <TouchableOpacity
-                                        key={min}
-                                        style={[styles.optionCard, active && styles.optionCardActive]}
-                                        onPress={() => setSleepMinutes(min)}
-                                    >
-                                        <Text style={styles.optionTitle}>
-                                            {min === 0 ? 'Desactivado' : `${min} minutos`}
-                                        </Text>
-                                        {active && <Check size={20} color="#60A5FA" />}
-                                    </TouchableOpacity>
-                                );
-                            })}
+                    {renderSubHeader(t('settings.timer.title'))}
+                    <ScrollView contentContainerStyle={styles.subContent}>
+                        <Text style={styles.subDescription}>
+                            {t('settings.timer.description')}
+                        </Text>
+                        {[0, 15, 30, 45, 60, 90].map((min) => {
+                            const active = sleepMinutes === min;
+                            return (
+                                <TouchableOpacity
+                                    key={min}
+                                    style={[styles.optionCard, active && styles.optionCardActive]}
+                                    onPress={() => setSleepTimerMinutes(min)}
+                                >
+                                    <Text style={styles.optionTitle}>
+                                        {min === 0
+                                            ? t('settings.timer.off')
+                                            : t('settings.timer.minutes', { min })}
+                                    </Text>
+                                    {active && <Check size={20} color="#60A5FA" />}
+                                </TouchableOpacity>
+                            );
+                        })}
                     </ScrollView>
                 </>
             );
         }
         if (activeSection === 'stats') {
             return (
-                <>
-                    {renderSubHeader('Estadísticas y Alarma')}
-                        <ScrollView contentContainerStyle={styles.subContent}>
-                            <View style={styles.infoCard}>
-                                <Text style={styles.infoCardTitle}>Tiempo total reproducido</Text>
-                                <Text style={styles.infoCardBody}>
-                                    0 min — El registro acumulado de escucha se conectará con el motor de estadísticas local.
-                                </Text>
-                            </View>
-                            <View style={styles.infoCard}>
-                                <Text style={styles.infoCardTitle}>Alarma musical</Text>
-                                <Text style={styles.infoCardBody}>
-                                    Módulo nativo de alarma programada planificado para la siguiente fase.
-                                </Text>
-                            </View>
-                    </ScrollView>
-                </>
+                <StatsAndAlarmView
+                    onBack={closeSection}
+                    onPlayTrackAndClose={(track, queue) => {
+                        playTrack(track, queue);
+                        onClose();
+                        onOpenPlayer?.();
+                    }}
+                />
             );
         }
         if (activeSection === 'trash') {
             return (
                 <>
-                    {renderSubHeader(`Eliminados recientemente (${trash.length})`)}
-                        <ScrollView contentContainerStyle={styles.subContent}>
-                            {trash.length > 0 ? (
-                                <TouchableOpacity
-                                    style={styles.dangerBtn}
-                                    onPress={async () => {
-                                        await emptyTrash();
-                                        setTrash([]);
-                                        Alert.alert('Papelera vaciada');
-                                    }}
-                                >
-                                    <Trash2 size={17} color="#FFFFFF" />
-                                    <Text style={styles.dangerBtnText}>Vaciar papelera</Text>
-                                </TouchableOpacity>
-                            ) : (
-                                <View style={styles.infoCard}>
-                                    <Text style={styles.infoCardBody}>
-                                        No hay canciones en la papelera interna.
+                    {renderSubHeader(t('settings.trash.header', { count: trash.length }))}
+                    <ScrollView contentContainerStyle={styles.subContent}>
+                        {trash.length > 0 ? (
+                            <TouchableOpacity
+                                style={styles.dangerBtn}
+                                onPress={async () => {
+                                    await emptyTrash();
+                                    setTrash([]);
+                                    Alert.alert(t('settings.trash.emptiedAlert'));
+                                }}
+                            >
+                                <Trash2 size={17} color="#FFFFFF" />
+                                <Text style={styles.dangerBtnText}>
+                                    {t('settings.trash.emptyBtn')}
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <View style={styles.infoCard}>
+                                <Text style={styles.infoCardBody}>
+                                    {t('settings.trash.emptyBody')}
+                                </Text>
+                            </View>
+                        )}
+
+                        {trash.map((item) => (
+                            <View key={item.id} style={styles.trashRow}>
+                                <View style={{ flex: 1, marginRight: 12 }}>
+                                    <Text style={styles.trashTitle} numberOfLines={1}>
+                                        {item.title}
+                                    </Text>
+                                    <Text style={styles.trashArtist} numberOfLines={1}>
+                                        {item.artist}
                                     </Text>
                                 </View>
-                            )}
-
-                            {trash.map((t) => (
-                                <View key={t.id} style={styles.trashRow}>
-                                    <View style={{ flex: 1, marginRight: 12 }}>
-                                        <Text style={styles.trashTitle} numberOfLines={1}>
-                                            {t.title}
-                                        </Text>
-                                        <Text style={styles.trashArtist} numberOfLines={1}>
-                                            {t.artist}
-                                        </Text>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={styles.restorePill}
-                                        onPress={async () => {
-                                            await restoreTrack(t.id);
-                                            setTrash(await getDeletedTracks());
-                                        }}
-                                    >
-                                        <Text style={styles.restoreText}>Restaurar</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
+                                <TouchableOpacity
+                                    style={styles.restorePill}
+                                    onPress={async () => {
+                                        await restoreTrack(item.id);
+                                        setTrash(await getDeletedTracks());
+                                    }}
+                                >
+                                    <Text style={styles.restoreText}>{t('common.restore')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ))}
                     </ScrollView>
                 </>
             );
@@ -549,26 +579,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
         if (activeSection === 'language') {
             return (
                 <>
-                    {renderSubHeader('Idioma')}
-                        <ScrollView contentContainerStyle={styles.subContent}>
-                            {(
-                                [
-                                    { code: 'es', label: 'Español' },
-                                    { code: 'en', label: 'English' },
-                                ] as const
-                            ).map((lang) => {
-                                const active = language === lang.code;
-                                return (
-                                    <TouchableOpacity
-                                        key={lang.code}
-                                        style={[styles.optionCard, active && styles.optionCardActive]}
-                                        onPress={() => setLanguage(lang.code)}
-                                    >
-                                        <Text style={styles.optionTitle}>{lang.label}</Text>
-                                        {active && <Check size={20} color="#60A5FA" />}
-                                    </TouchableOpacity>
-                                );
-                            })}
+                    {renderSubHeader(t('settings.language.title'))}
+                    <ScrollView contentContainerStyle={styles.subContent}>
+                        <Text style={styles.subDescription}>
+                            {t('settings.language.description')}
+                        </Text>
+                        {supportedLanguages.map((lang) => {
+                            const active = language === lang.code;
+                            return (
+                                <TouchableOpacity
+                                    key={lang.code}
+                                    style={[styles.optionCard, active && styles.optionCardActive]}
+                                    onPress={() => setLanguage(lang.code)}
+                                >
+                                    <View>
+                                        <Text style={styles.optionTitle}>{lang.nativeName}</Text>
+                                        <Text style={styles.optionSub}>{lang.englishName}</Text>
+                                    </View>
+                                    {active && <Check size={20} color="#60A5FA" />}
+                                </TouchableOpacity>
+                            );
+                        })}
                     </ScrollView>
                 </>
             );
@@ -579,92 +610,95 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                     style={{ flex: 1 }}
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 >
-                    {renderSubHeader('Reportar problema')}
-                        <ScrollView
-                            contentContainerStyle={styles.subContent}
-                            keyboardShouldPersistTaps="handled"
-                        >
-                            <Text style={styles.subDescription}>
-                                Cuéntanos qué ocurrió y opcionalmente adjunta hasta 5 capturas para ayudarnos a reproducir el fallo.
-                            </Text>
-                            <TextInput
-                                style={styles.reportInput}
-                                placeholder="Describe el problema..."
-                                placeholderTextColor="#71717A"
-                                multiline
-                                value={bugReport}
-                                onChangeText={setBugReport}
-                            />
+                    {renderSubHeader(t('settings.report.title'))}
+                    <ScrollView
+                        contentContainerStyle={styles.subContent}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        <Text style={styles.subDescription}>
+                            {t('settings.report.description')}
+                        </Text>
+                        <TextInput
+                            style={styles.reportInput}
+                            placeholder={t('settings.report.placeholder')}
+                            placeholderTextColor="#71717A"
+                            multiline
+                            value={bugReport}
+                            onChangeText={setBugReport}
+                        />
 
-                            {/* Adjunto opcional de hasta 5 imágenes */}
-                            <View style={styles.attachmentsBlock}>
-                                <View style={styles.attachmentsHeader}>
-                                    <Text style={styles.attachmentsTitle}>
-                                        Capturas adjuntas (opcional)
-                                    </Text>
-                                    <Text style={styles.attachmentsCounter}>
-                                        {reportImages.length}/5
-                                    </Text>
-                                </View>
-
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.attachmentsRow}
-                                >
-                                    {reportImages.length < 5 && (
-                                        <TouchableOpacity
-                                            style={styles.addAttachmentBtn}
-                                            activeOpacity={0.8}
-                                            onPress={handlePickReportImages}
-                                        >
-                                            <ImagePlus size={22} color="#60A5FA" />
-                                            <Text style={styles.addAttachmentText}>Adjuntar</Text>
-                                        </TouchableOpacity>
-                                    )}
-
-                                    {reportImages.map((uri) => (
-                                        <View key={uri} style={styles.attachmentThumbWrap}>
-                                            <Image
-                                                source={{ uri }}
-                                                style={styles.attachmentThumb}
-                                                resizeMode="cover"
-                                            />
-                                            <TouchableOpacity
-                                                style={styles.attachmentRemoveBtn}
-                                                onPress={() => handleRemoveReportImage(uri)}
-                                            >
-                                                <X size={13} color="#FFFFFF" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    ))}
-                                </ScrollView>
+                        {/* Adjunto opcional de hasta 5 imágenes */}
+                        <View style={styles.attachmentsBlock}>
+                            <View style={styles.attachmentsHeader}>
+                                <Text style={styles.attachmentsTitle}>
+                                    {t('settings.report.attachmentsTitle')}
+                                </Text>
+                                <Text style={styles.attachmentsCounter}>
+                                    {reportImages.length}/5
+                                </Text>
                             </View>
 
-                            <TouchableOpacity style={styles.primaryBtn} onPress={sendBugReport}>
-                                <Mail size={18} color="#000000" />
-                                <Text style={styles.primaryBtnText}>
-                                    {reportImages.length > 0
-                                        ? `Enviar reporte (${reportImages.length} ${
-                                              reportImages.length === 1 ? 'imagen' : 'imágenes'
-                                          })`
-                                        : 'Enviar reporte por correo'}
-                                </Text>
-                            </TouchableOpacity>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.attachmentsRow}
+                            >
+                                {reportImages.length < 5 && (
+                                    <TouchableOpacity
+                                        style={styles.addAttachmentBtn}
+                                        activeOpacity={0.8}
+                                        onPress={handlePickReportImages}
+                                    >
+                                        <ImagePlus size={22} color="#60A5FA" />
+                                        <Text style={styles.addAttachmentText}>
+                                            {t('settings.report.attachBtn')}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+
+                                {reportImages.map((uri) => (
+                                    <View key={uri} style={styles.attachmentThumbWrap}>
+                                        <Image
+                                            source={{ uri }}
+                                            style={styles.attachmentThumb}
+                                            resizeMode="cover"
+                                        />
+                                        <TouchableOpacity
+                                            style={styles.attachmentRemoveBtn}
+                                            onPress={() => handleRemoveReportImage(uri)}
+                                        >
+                                            <X size={13} color="#FFFFFF" />
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                            </ScrollView>
+                        </View>
+
+                        <TouchableOpacity style={styles.primaryBtn} onPress={sendBugReport}>
+                            <Mail size={18} color="#000000" />
+                            <Text style={styles.primaryBtnText}>
+                                {reportImages.length > 0
+                                    ? t('settings.report.sendWithImages', {
+                                          count: reportImages.length,
+                                          unit:
+                                              reportImages.length === 1
+                                                  ? t('settings.report.imageSingular')
+                                                  : t('settings.report.imagePlural'),
+                                      })
+                                    : t('settings.report.sendEmail')}
+                            </Text>
+                        </TouchableOpacity>
                     </ScrollView>
                 </KeyboardAvoidingView>
             );
         }
         return (
             <>
-                {renderSubHeader('Acerca de')}
+                {renderSubHeader(t('settings.about.title'))}
                 <ScrollView contentContainerStyle={styles.subContent}>
                     <View style={styles.infoCard}>
                         <Text style={styles.infoCardTitle}>Snow Beats</Text>
-                        <Text style={styles.infoCardBody}>
-                            Versión 0.1.0 · Reproductor de música local diseñado para alto rendimiento,
-                            privacidad total sin servidor y personalización visual.
-                        </Text>
+                        <Text style={styles.infoCardBody}>{t('settings.about.body')}</Text>
                     </View>
                 </ScrollView>
             </>
@@ -699,7 +733,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
                         <TouchableOpacity onPress={onClose} style={styles.backBtn}>
                             <ArrowLeft size={22} color="#FFFFFF" />
                         </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Configuración</Text>
+                        <Text style={styles.headerTitle}>{t('settings.title')}</Text>
                     </View>
 
                     <ScrollView
@@ -852,6 +886,11 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 15,
         fontWeight: '600',
+    },
+    optionSub: {
+        color: '#9CA3AF',
+        fontSize: 12.5,
+        marginTop: 2,
     },
     infoCard: {
         backgroundColor: '#151822',

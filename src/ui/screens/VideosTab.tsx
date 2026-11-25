@@ -17,6 +17,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { Film, X, LayoutGrid, List, Maximize2, Minimize2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { setScreenOrientation } from '../../../modules/snow-metadata';
 
@@ -174,6 +175,7 @@ interface VideosTabProps {
 
 export const VideosTab: React.FC<VideosTabProps> = React.memo(({ refreshSignal = 0 }) => {
     const { fgColor, mutedColor } = useTheme();
+    const { t } = useI18n();
     const { pausePlayback } = usePlayer();
     const [videos, setVideos] = useState<MediaLibrary.Asset[]>([]);
     const [thumbs, setThumbs] = useState<Record<string, string>>({});
@@ -364,7 +366,9 @@ export const VideosTab: React.FC<VideosTabProps> = React.memo(({ refreshSignal =
         <View style={{ flex: 1 }}>
             {/* Selector fijo arriba al scrollear */}
             <View style={styles.toolbar}>
-                <Text style={{ color: mutedColor, fontSize: 13 }}>{videos.length} videos</Text>
+                <Text style={{ color: mutedColor, fontSize: 13 }}>
+                    {t('videos.count', { count: videos.length })}
+                </Text>
                 <View style={styles.modeBtns}>
                     <TouchableOpacity
                         style={[styles.modeBtn, viewMode === 'grid' && styles.modeBtnActive]}
@@ -406,8 +410,8 @@ export const VideosTab: React.FC<VideosTabProps> = React.memo(({ refreshSignal =
                 ListEmptyComponent={
                     <Text style={{ color: mutedColor, textAlign: 'center', marginTop: 32 }}>
                         {Platform.OS === 'web'
-                            ? 'Los videos locales se escanean en Android.'
-                            : 'No se encontraron videos locales.'}
+                            ? t('videos.emptyWeb')
+                            : t('videos.emptyDevice')}
                     </Text>
                 }
             />

@@ -33,6 +33,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ParsedLyrics } from '../../audio-engine/lyricsParser';
 import { getAdaptiveCardInk, getDynamicPlayerPalette } from '../../theme/colorContrast';
+import { useI18n } from '../../i18n';
 import { Track } from '../../types/music';
 import { renderShareCard, RenderShareCardOptions } from '../../../modules/snow-metadata';
 
@@ -73,6 +74,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
         onClose,
     }) => {
         const insets = useSafeAreaInsets();
+        const { t } = useI18n();
         const hasLyrics = Boolean(lyrics && lyrics.lines.length > 0);
 
         const dynamicPalette = useMemo(
@@ -177,7 +179,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
             return [...selectedIndices]
                 .sort((a, b) => a - b)
                 .map((idx) => lyrics.lines[idx]?.text)
-                .filter((t): t is string => Boolean(t));
+                .filter((line): line is string => Boolean(line));
         }, [lyrics, selectedIndices]);
 
         // Alterna una línea respetando límite de 6 líneas seleccionadas
@@ -205,9 +207,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                     setBgImageUri(res.assets[0].uri);
                 }
             } catch {
-                Alert.alert('Imagen', 'No se pudo abrir la galería de imágenes.');
+                Alert.alert(t('theme.galleryErrorTitle'), t('theme.galleryErrorBody'));
             }
-        }, []);
+        }, [t]);
 
         const cycleAlign = useCallback(() => {
             setTextAlign((prev) => (prev === 'left' ? 'center' : prev === 'center' ? 'right' : 'left'));
@@ -241,7 +243,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                     if (pngUri && (await Sharing.isAvailableAsync())) {
                         await Sharing.shareAsync(pngUri, {
                             mimeType: 'image/png',
-                            dialogTitle: `Compartir ${track.title}`,
+                            dialogTitle: t('shareCard.shareDialogTitle', { title: track.title }),
                         });
                         return;
                     }
@@ -251,10 +253,10 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                 const body =
                     cardMode === 'lyrics' && selectedLines.length > 0
                         ? `"${selectedLines.join('\n')}"\n\n— ${track.title} · ${track.artist} (Snow Beats)`
-                        : `${track.title} — ${track.artist} · Escuchando en Snow Beats`;
+                        : `${track.title} — ${track.artist} · ${t('shareCard.listeningOn')}`;
                 await Share.share({ message: body });
             } catch {
-                Alert.alert('Compartir', 'No se pudo generar la tarjeta para compartir.');
+                Alert.alert(t('common.share'), t('shareCard.shareError'));
             } finally {
                 setExporting(false);
             }
@@ -269,6 +271,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
             textAlign,
             uppercase,
             selectedLines,
+            t,
         ]);
 
         const handleShareText = useCallback(async () => {
@@ -365,7 +368,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         style={[styles.miniArtist, { color: cardInk.secondaryText }]}
                                         numberOfLines={1}
                                     >
-                                        Canción · {track.artist}
+                                        {t('shareCard.songMetaPrefix')} · {track.artist}
                                     </Text>
                                 </View>
                             </View>
@@ -421,11 +424,15 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     <ChevronDown size={26} color="#FFFFFF" />
                                 </TouchableOpacity>
                                 <View style={styles.topCenter}>
-                                    <Text style={styles.topTitle}>Elegir letras</Text>
+                                    <Text style={styles.topTitle}>
+                                        {t('shareCard.selectLyricsTitle')}
+                                    </Text>
                                     <Text style={styles.topSub}>
                                         {selectedIndices.length}{' '}
-                                        {selectedIndices.length === 1 ? 'línea seleccionada' : 'líneas seleccionadas'}{' '}
-                                        (máx. {MAX_SELECTED_LINES})
+                                        {selectedIndices.length === 1
+                                            ? t('shareCard.linesSelectedSingular')
+                                            : t('shareCard.linesSelectedPlural')}{' '}
+                                        {t('shareCard.maxLines', { max: MAX_SELECTED_LINES })}
                                     </Text>
                                 </View>
                                 <View style={styles.topIconBtn} />
@@ -475,7 +482,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         setStep('preview');
                                     }}
                                 >
-                                    <Text style={styles.whitePillBtnText}>Continuar</Text>
+                                    <Text style={styles.whitePillBtnText}>
+                                        {t('common.continue')}
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         </>
@@ -489,7 +498,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     <ChevronDown size={26} color="#FFFFFF" />
                                 </TouchableOpacity>
                                 <View style={styles.topCenter}>
-                                    <Text style={styles.topTitle}>Compartir tarjeta</Text>
+                                    <Text style={styles.topTitle}>
+                                        {t('shareCard.previewTitle')}
+                                    </Text>
                                 </View>
                                 <View style={styles.topIconBtn} />
                             </View>
@@ -517,7 +528,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                                     cardMode === 'song' && styles.modeSwitchTextActive,
                                                 ]}
                                             >
-                                                Canción
+                                                {t('shareCard.songTab')}
                                             </Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
@@ -533,7 +544,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                                     cardMode === 'lyrics' && styles.modeSwitchTextActive,
                                                 ]}
                                             >
-                                                Letra
+                                                {t('shareCard.lyricsTab')}
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
@@ -573,7 +584,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         onPress={() => setStep('select_lyrics')}
                                     >
                                         <Pencil size={15} color="#FFFFFF" />
-                                        <Text style={styles.editLyricsText}>Editar letra</Text>
+                                        <Text style={styles.editLyricsText}>
+                                            {t('shareCard.editLyrics')}
+                                        </Text>
                                     </TouchableOpacity>
                                 )}
                             </ScrollView>
@@ -591,7 +604,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     ) : (
                                         <>
                                             <Share2 size={18} color="#000000" />
-                                            <Text style={styles.primaryShareText}>Compartir imagen</Text>
+                                            <Text style={styles.primaryShareText}>
+                                                {t('shareCard.shareImage')}
+                                            </Text>
                                         </>
                                     )}
                                 </TouchableOpacity>
@@ -601,7 +616,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     activeOpacity={0.8}
                                     onPress={handleShareText}
                                 >
-                                    <Text style={styles.secondaryShareText}>Solo texto</Text>
+                                    <Text style={styles.secondaryShareText}>
+                                        {t('shareCard.textOnly')}
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         </>
@@ -618,7 +635,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     <ArrowLeft size={24} color="#FFFFFF" />
                                 </TouchableOpacity>
                                 <View style={styles.topCenter}>
-                                    <Text style={styles.topTitle}>Personalizar tarjeta</Text>
+                                    <Text style={styles.topTitle}>
+                                        {t('shareCard.customizeTitle')}
+                                    </Text>
                                 </View>
                                 <View style={styles.topIconBtn} />
                             </View>
@@ -667,7 +686,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                             onPress={handlePickBgImage}
                                         >
                                             <ImageIcon size={17} color="#FFFFFF" />
-                                            <Text style={styles.toolActionText}>Elegir de galería</Text>
+                                            <Text style={styles.toolActionText}>
+                                                {t('shareCard.pickGallery')}
+                                            </Text>
                                         </TouchableOpacity>
                                         {bgImageUri && (
                                             <TouchableOpacity
@@ -676,7 +697,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                             >
                                                 <Trash2 size={16} color="#F87171" />
                                                 <Text style={[styles.toolActionText, { color: '#F87171' }]}>
-                                                    Quitar foto
+                                                    {t('shareCard.removePhoto')}
                                                 </Text>
                                             </TouchableOpacity>
                                         )}
@@ -688,10 +709,10 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         <View style={styles.fontChipsRow}>
                                             {(
                                                 [
-                                                    { key: 'classic', label: 'Clásico' },
-                                                    { key: 'wide', label: 'Ancho' },
-                                                    { key: 'narrow', label: 'Estrecho' },
-                                                    { key: 'italic', label: 'Inclinado' },
+                                                    { key: 'classic', label: t('shareCard.fontClassic') },
+                                                    { key: 'wide', label: t('shareCard.fontWide') },
+                                                    { key: 'narrow', label: t('shareCard.fontNarrow') },
+                                                    { key: 'italic', label: t('shareCard.fontItalic') },
                                                 ] as const
                                             ).map((f) => {
                                                 const active = fontStyle === f.key;
@@ -750,7 +771,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         onPress={() => setCustomizerTab('color')}
                                     >
                                         <Palette size={20} color="#FFFFFF" />
-                                        <Text style={styles.customizerTabLabel}>Color</Text>
+                                        <Text style={styles.customizerTabLabel}>
+                                            {t('shareCard.tabColor')}
+                                        </Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         style={[
@@ -760,7 +783,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                         onPress={() => setCustomizerTab('image')}
                                     >
                                         <ImageIcon size={20} color="#FFFFFF" />
-                                        <Text style={styles.customizerTabLabel}>Imágenes</Text>
+                                        <Text style={styles.customizerTabLabel}>
+                                            {t('shareCard.tabImages')}
+                                        </Text>
                                     </TouchableOpacity>
                                     {cardMode === 'lyrics' && (
                                         <TouchableOpacity
@@ -771,7 +796,9 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                             onPress={() => setCustomizerTab('text')}
                                         >
                                             <Type size={20} color="#FFFFFF" />
-                                            <Text style={styles.customizerTabLabel}>Texto</Text>
+                                            <Text style={styles.customizerTabLabel}>
+                                                {t('shareCard.tabText')}
+                                            </Text>
                                         </TouchableOpacity>
                                     )}
                                 </View>
@@ -780,7 +807,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = React.memo(
                                     style={[styles.whitePillBtn, { alignSelf: 'center', marginTop: 12 }]}
                                     onPress={() => setStep('preview')}
                                 >
-                                    <Text style={styles.whitePillBtnText}>Listo</Text>
+                                    <Text style={styles.whitePillBtnText}>{t('common.done')}</Text>
                                 </TouchableOpacity>
                             </View>
                         </>

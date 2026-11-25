@@ -22,6 +22,7 @@ import {
 } from '../../storage/database/db';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { SongCard } from '../components/SongCard';
 import { CollageArtwork } from '../components/CollageArtWork';
@@ -37,6 +38,7 @@ interface PlaylistsTabProps {
 export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
     ({ onOpenPlayer, refreshKey = 0, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
+        const { t } = useI18n();
         const { currentTrack, isPlaying, playTrack } = usePlayer();
         const [playlists, setPlaylists] = useState<Playlist[]>([]);
         const [modalOpen, setModalOpen] = useState(false);
@@ -104,18 +106,22 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                     {opened.id && (
                         <TouchableOpacity
                             onPress={() =>
-                                Alert.alert('Eliminar playlist', `¿Eliminar "${opened.title}"?`, [
-                                    { text: 'Cancelar', style: 'cancel' },
-                                    {
-                                        text: 'Eliminar',
-                                        style: 'destructive',
-                                        onPress: async () => {
-                                            await deletePlaylist(opened.id!);
-                                            setOpened(null);
-                                            load();
+                                Alert.alert(
+                                    t('playlists.deleteTitle'),
+                                    t('playlists.deleteConfirm', { name: opened.title }),
+                                    [
+                                        { text: t('common.cancel'), style: 'cancel' },
+                                        {
+                                            text: t('common.delete'),
+                                            style: 'destructive',
+                                            onPress: async () => {
+                                                await deletePlaylist(opened.id!);
+                                                setOpened(null);
+                                                load();
+                                            },
                                         },
-                                    },
-                                ])
+                                    ]
+                                )
                             }
                         >
                             <Trash2 size={20} color="#F87171" />
@@ -143,8 +149,8 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                                 track={item}
                                 isCurrentTrack={isCurrent}
                                 isPlaying={isCurrent && isPlaying}
-                                onPress={(t) => {
-                                    playTrack(t, opened.tracks);
+                                onPress={(track) => {
+                                    playTrack(track, opened.tracks);
                                     onOpenPlayer?.();
                                 }}
                                 onLongPress={
@@ -162,7 +168,7 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                     }}
                     ListEmptyComponent={
                         <Text style={{ color: mutedColor, textAlign: 'center', marginTop: 32 }}>
-                            Esta playlist aún no tiene canciones.
+                            {t('playlists.emptyPlaylist')}
                         </Text>
                     }
                 />
@@ -171,10 +177,10 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
     }
 
     const autoLists = [
-        { key: 'favorites' as const, label: 'Canciones favoritas', icon: Heart },
-        { key: 'recent' as const, label: 'Recientemente reproducidas', icon: Clock },
-        { key: 'most_played' as const, label: 'Más reproducido', icon: Flame },
-        { key: 'with_lyrics' as const, label: 'Con letras', icon: FileText },
+        { key: 'favorites' as const, label: t('playlists.favorites'), icon: Heart },
+        { key: 'recent' as const, label: t('playlists.recent'), icon: Clock },
+        { key: 'most_played' as const, label: t('playlists.mostPlayed'), icon: Flame },
+        { key: 'with_lyrics' as const, label: t('playlists.withLyrics'), icon: FileText },
     ];
 
     return (
@@ -196,10 +202,12 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                     <View>
                         <TouchableOpacity style={styles.newBtn} onPress={() => setModalOpen(true)}>
                             <Plus size={20} color="#000000" />
-                            <Text style={styles.newBtnText}>Nueva playlist</Text>
+                            <Text style={styles.newBtnText}>{t('playlists.newBtn')}</Text>
                         </TouchableOpacity>
 
-                        <Text style={[styles.sectionTitle, { color: mutedColor }]}>Listas automáticas</Text>
+                        <Text style={[styles.sectionTitle, { color: mutedColor }]}>
+                            {t('playlists.autoSection')}
+                        </Text>
                         {autoLists.map(({ key, label, icon: Icon }) => (
                             <TouchableOpacity
                                 key={key}
@@ -219,7 +227,7 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                         ))}
 
                         <Text style={[styles.sectionTitle, { color: mutedColor, marginTop: 18 }]}>
-                            Tus playlists ({playlists.length})
+                            {t('playlists.yourPlaylists', { count: playlists.length })}
                         </Text>
                     </View>
                 }
@@ -245,7 +253,10 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                                 {item.name}
                             </Text>
                             <Text style={{ color: mutedColor, fontSize: 12, marginTop: 2 }}>
-                                {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
+                                {item.trackCount}{' '}
+                                {item.trackCount === 1
+                                    ? t('common.songSingular')
+                                    : t('common.songPlural')}
                             </Text>
                         </View>
                         <ChevronRight size={18} color={mutedColor} />
@@ -259,10 +270,10 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                 onClose={() => setModalOpen(false)}
                 avoidKeyboard
             >
-                <Text style={styles.modalTitle}>Nueva playlist</Text>
+                <Text style={styles.modalTitle}>{t('playlists.newBtn')}</Text>
                 <TextInput
                     style={styles.input}
-                    placeholder="Nombre de la playlist"
+                    placeholder={t('playlists.namePlaceholder')}
                     placeholderTextColor="#9CA3AF"
                     value={newName}
                     onChangeText={setNewName}
@@ -272,14 +283,16 @@ export const PlaylistsTab: React.FC<PlaylistsTabProps> = React.memo(
                 />
                 <View style={styles.modalActions}>
                     <TouchableOpacity onPress={() => setModalOpen(false)}>
-                        <Text style={{ color: '#9CA3AF', padding: 10 }}>Cancelar</Text>
+                        <Text style={{ color: '#9CA3AF', padding: 10 }}>{t('common.cancel')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.createConfirmBtn, !newName.trim() && { opacity: 0.5 }]}
                         disabled={!newName.trim()}
                         onPress={handleCreate}
                     >
-                        <Text style={{ color: '#000000', fontWeight: '700' }}>Crear</Text>
+                        <Text style={{ color: '#000000', fontWeight: '700' }}>
+                            {t('common.create')}
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </AnimatedBottomSheet>

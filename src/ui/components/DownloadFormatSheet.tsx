@@ -11,6 +11,7 @@ import {
 import { Check, Film, Music, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DownloadFormatOption, ExtractedMediaInfo } from '../../../modules/snow-metadata';
+import { useI18n } from '../../i18n';
 
 interface DownloadFormatSheetProps {
     visible: boolean;
@@ -19,8 +20,8 @@ interface DownloadFormatSheetProps {
     onConfirm: (format: DownloadFormatOption) => void;
 }
 
-function formatBytes(bytes: number): string {
-    if (!bytes || bytes <= 0) return 'Tamaño variable';
+function formatBytes(bytes: number, variableLabel: string): string {
+    if (!bytes || bytes <= 0) return variableLabel;
     const mb = bytes / (1024 * 1024);
     if (mb < 1) {
         return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -32,6 +33,7 @@ function formatBytes(bytes: number): string {
 export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.memo(
     ({ visible, mediaInfo, onClose, onConfirm }) => {
         const insets = useSafeAreaInsets();
+        const { t } = useI18n();
         const audioFormats = mediaInfo?.audioFormats ?? [];
         const videoFormats = mediaInfo?.videoFormats ?? [];
         const [selected, setSelected] = useState<DownloadFormatOption | null>(null);
@@ -72,7 +74,9 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                     </View>
 
                     <View style={styles.formatRight}>
-                        <Text style={styles.formatSize}>{formatBytes(fmt.filesize)}</Text>
+                        <Text style={styles.formatSize}>
+                            {formatBytes(fmt.filesize, t('downloads.variableSize'))}
+                        </Text>
                         <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
                             {isSelected && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
                         </View>
@@ -100,7 +104,7 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                         <View style={styles.handleBar} />
 
                         <View style={styles.topRow}>
-                            <Text style={styles.sheetTitle}>Descargar archivo como</Text>
+                            <Text style={styles.sheetTitle}>{t('downloads.formatSheetTitle')}</Text>
                             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                                 <X size={20} color="#A1A1AA" />
                             </TouchableOpacity>
@@ -121,7 +125,7 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                             )}
                             <View style={styles.mediaInfoCol}>
                                 <Text style={styles.mediaTitle} numberOfLines={2}>
-                                    {mediaInfo.title || 'Sin título'}
+                                    {mediaInfo.title || t('common.untitled')}
                                 </Text>
                                 <Text style={styles.mediaDomain} numberOfLines={1}>
                                     {mediaInfo.domain || mediaInfo.platform || 'Streaming'}
@@ -136,14 +140,18 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                         >
                             {audioFormats.length > 0 && (
                                 <View style={styles.sectionBlock}>
-                                    <Text style={styles.sectionHeading}>Audio (menor a mayor calidad)</Text>
+                                    <Text style={styles.sectionHeading}>
+                                        {t('downloads.audioFormatsHeading')}
+                                    </Text>
                                     {audioFormats.map(renderOptionRow)}
                                 </View>
                             )}
 
                             {videoFormats.length > 0 && (
                                 <View style={styles.sectionBlock}>
-                                    <Text style={styles.sectionHeading}>Video (menor a mayor calidad)</Text>
+                                    <Text style={styles.sectionHeading}>
+                                        {t('downloads.videoFormatsHeading')}
+                                    </Text>
                                     {videoFormats.map(renderOptionRow)}
                                 </View>
                             )}
@@ -157,7 +165,7 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                                 if (selected) onConfirm(selected);
                             }}
                         >
-                            <Text style={styles.confirmBtnText}>Descargar</Text>
+                            <Text style={styles.confirmBtnText}>{t('downloads.downloadBtn')}</Text>
                         </TouchableOpacity>
                     </View>
                 </View>

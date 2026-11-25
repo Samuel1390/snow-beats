@@ -5,6 +5,8 @@ export interface ThemeImagePreset {
     name: string;
     dark: ImageSourcePropType;
     light: ImageSourcePropType;
+    // Indica si la variante clara de la imagen es luminosa (para elegir texto oscuro o claro)
+    lightVariantIsBright: boolean;
 }
 
 export interface PreviewTrackItem {
@@ -21,36 +23,42 @@ export const THEME_IMAGE_PRESETS: ThemeImagePreset[] = [
         name: 'Metaverse',
         dark: require('../../assets/themes/dark/metaverse.jpg'),
         light: require('../../assets/themes/light/metaverse.jpg'),
+        lightVariantIsBright: false,
     },
     {
         id: 'cosmic',
         name: 'Cosmic',
         dark: require('../../assets/themes/dark/cosmic.jpg'),
         light: require('../../assets/themes/light/cosmic.jpg'),
+        lightVariantIsBright: false,
     },
     {
         id: 'mechanic_city',
         name: 'Mechanic City',
         dark: require('../../assets/themes/dark/mechanic_city.jpg'),
         light: require('../../assets/themes/light/mechanic_city.jpg'),
+        lightVariantIsBright: true,
     },
     {
         id: 'satellite',
         name: 'Satellite',
         dark: require('../../assets/themes/dark/satellite.jpg'),
         light: require('../../assets/themes/light/satellite.jpg'),
+        lightVariantIsBright: false,
     },
     {
         id: 'katana',
         name: 'Katana',
         dark: require('../../assets/themes/dark/katana.jpg'),
         light: require('../../assets/themes/light/katana.jpg'),
+        lightVariantIsBright: true,
     },
     {
         id: 'robotic_arm',
         name: 'Robotic Arm',
         dark: require('../../assets/themes/dark/robotic_arm.jpg'),
         light: require('../../assets/themes/light/robotic_arm.jpg'),
+        lightVariantIsBright: false,
     },
 ];
 
@@ -88,12 +96,17 @@ export const PREVIEW_TRACKS: PreviewTrackItem[] = [
     },
 ];
 
+// Obtiene los metadatos de un fondo predeterminado por su identificador
+export function getThemePresetById(presetId: string): ThemeImagePreset | null {
+    return THEME_IMAGE_PRESETS.find((p) => p.id === presetId) ?? null;
+}
+
 // Resuelve el recurso empaquetado de un fondo predeterminado según si el tema efectivo es oscuro o claro
 export function getPresetImageSource(
     presetId: string,
     isDarkMode: boolean
 ): ImageSourcePropType | null {
-    const found = THEME_IMAGE_PRESETS.find((p) => p.id === presetId);
+    const found = getThemePresetById(presetId);
     if (!found) return null;
     return isDarkMode ? found.dark : found.light;
 }

@@ -16,6 +16,7 @@ import {
     ExtractedMediaInfo,
     PlaylistDownloadEntry,
 } from '../../../modules/snow-metadata';
+import { useI18n } from '../../i18n';
 
 interface PlaylistDownloadModalProps {
     visible: boolean;
@@ -38,6 +39,7 @@ function formatDuration(sec: number): string {
 export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React.memo(
     ({ visible, mediaInfo, onClose, onConfirm }) => {
         const insets = useSafeAreaInsets();
+        const { t } = useI18n();
         const entries = useMemo(() => mediaInfo?.entries ?? [], [mediaInfo?.entries]);
         const audioFormats = useMemo(() => mediaInfo?.audioFormats ?? [], [mediaInfo?.audioFormats]);
         const videoFormats = useMemo(() => mediaInfo?.videoFormats ?? [], [mediaInfo?.videoFormats]);
@@ -113,7 +115,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                             <X size={24} color="#FFFFFF" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle} numberOfLines={1}>
-                            Descarga de lista de reproducción
+                            {t('downloads.playlistModalTitle')}
                         </Text>
                     </View>
 
@@ -126,7 +128,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                         <View style={[styles.checkCircle, allSelected && styles.checkCircleActive]}>
                             {allSelected && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
                         </View>
-                        <Text style={styles.selectAllText}>Seleccionar todo</Text>
+                        <Text style={styles.selectAllText}>{t('downloads.selectAll')}</Text>
                         <Text style={styles.selectCountBadge}>
                             {selectedIds.size}/{entries.length}
                         </Text>
@@ -152,7 +154,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                                         formatTab === 'audio' && styles.typePillTextActive,
                                     ]}
                                 >
-                                    Audio
+                                    {t('common.audio')}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -172,7 +174,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                                         formatTab === 'video' && styles.typePillTextActive,
                                     ]}
                                 >
-                                    Video
+                                    {t('common.video')}
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -275,7 +277,7 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                         >
                             <Download size={19} color="#FFFFFF" />
                             <Text style={styles.downloadAllText}>
-                                Descargar ({selectedIds.size})
+                                {t('downloads.downloadCount', { count: selectedIds.size })}
                             </Text>
                         </TouchableOpacity>
                     </View>

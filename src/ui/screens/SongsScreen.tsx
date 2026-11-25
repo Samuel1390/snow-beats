@@ -47,15 +47,17 @@ import { FullPlayerModal } from './FullPlayerModal';
 import { SelectionActionBar } from '../components/SelectionActionBar';
 import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 import { pickWebAudioFiles } from '../../storage/scanner/webAudioPicker';
+import { useI18n } from '../../i18n/LanguageContext';
+import { TranslationKey } from '../../i18n/types';
 
-const TABS: { key: MainTab; label: string }[] = [
-    { key: 'downloads', label: 'Descargas' },
-    { key: 'songs', label: 'Canciones' },
-    { key: 'playlists', label: 'Playlists' },
-    { key: 'folders', label: 'Carpetas' },
-    { key: 'artists', label: 'Artistas' },
-    { key: 'albums', label: 'Álbumes' },
-    { key: 'videos', label: 'Videos' },
+const TABS: { key: MainTab; labelKey: TranslationKey }[] = [
+    { key: 'downloads', labelKey: 'tabs.downloads' },
+    { key: 'songs', labelKey: 'tabs.songs' },
+    { key: 'playlists', labelKey: 'tabs.playlists' },
+    { key: 'folders', labelKey: 'tabs.folders' },
+    { key: 'artists', labelKey: 'tabs.artists' },
+    { key: 'albums', labelKey: 'tabs.albums' },
+    { key: 'videos', labelKey: 'tabs.videos' },
 ];
 
 // Canciones sigue siendo la sección por defecto al abrir Snow Beats
@@ -128,6 +130,7 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
         onDeleteSelected,
         onWebFilesAdded,
     }) => {
+        const { t } = useI18n();
         const listRef = useRef<FlatList<Track>>(null);
         const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
         const hasSelectionRef = useRef(selectedIds.length > 0);
@@ -232,8 +235,8 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
                         <View style={styles.centered}>
                             <Text style={[styles.statusText, { color: mutedColor }]}>
                                 {Platform.OS === 'web'
-                                    ? 'Vista previa web: carga archivos de audio locales para probar la app aquí.'
-                                    : 'No se encontraron canciones en el dispositivo.'}
+                                    ? t('songs.emptyWeb')
+                                    : t('songs.emptyDevice')}
                             </Text>
                             {Platform.OS === 'web' && (
                                 <TouchableOpacity
@@ -243,7 +246,7 @@ const SongsListPane: React.FC<SongsListPaneProps> = React.memo(
                                         if (added > 0) await onWebFilesAdded();
                                     }}
                                 >
-                                    <Text style={styles.retryText}>Cargar audios locales</Text>
+                                    <Text style={styles.retryText}>{t('songs.loadLocalWeb')}</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -273,8 +276,9 @@ export const SongsScreen: React.FC = () => {
     const [videoRefreshSignal, setVideoRefreshSignal] = useState<number>(0);
 
     const { fgColor, mutedColor } = useTheme();
+    const { t } = useI18n();
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [scanStatus, setScanStatus] = useState<string>('Verificando permisos...');
+    const [scanStatus, setScanStatus] = useState<string>(t('songs.checkingPermissions'));
     const [searchOpen, setSearchOpen] = useState(false);
     const [sortOpen, setSortOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -381,7 +385,7 @@ export const SongsScreen: React.FC = () => {
         async (currentSort: SortOption, fromUserAction = false) => {
             setLoading(true);
             setErrorMessage(null);
-            setScanStatus('Verificando permisos...');
+            setScanStatus(t('songs.checkingPermissions'));
             try {
                 const perm = await requestAudioPermission(fromUserAction);
                 if (!perm.granted) {
@@ -389,9 +393,9 @@ export const SongsScreen: React.FC = () => {
                     return;
                 }
                 setPermissionDenied(false);
-                setScanStatus('Escaneando música local...');
+                setScanStatus(t('songs.scanningLocal'));
                 await scanLocalAudioLibrary((msg) => setScanStatus(msg));
-                setScanStatus('Cargando biblioteca...');
+                setScanStatus(t('songs.loadingLibrary'));
                 const list = await getVisibleTracks(currentSort);
                 setTracks(list);
                 setLibraryVersion((v) => v + 1);
@@ -403,7 +407,7 @@ export const SongsScreen: React.FC = () => {
                 setLoading(false);
             }
         },
-        [enrichMetadataInBackground]
+        [enrichMetadataInBackground, t]
     );
 
     useEffect(() => {
@@ -589,32 +593,35 @@ export const SongsScreen: React.FC = () => {
 
     const handleAddToQueueSelected = useCallback(() => {
         const idSet = new Set(selectedIdsRef.current);
-        const picked = tracksRef.current.filter((t) => idSet.has(t.id));
+        const picked = tracksRef.current.filter((item) => idSet.has(item.id));
         if (picked.length === 0) return;
         addToQueue(picked);
         setSelectedIds([]);
-        Alert.alert('Cola actualizada', `Se agregaron ${picked.length} canciones a la cola.`);
-    }, [addToQueue]);
+        Alert.alert(
+            t('songs.queueUpdatedTitle'),
+            t('songs.queueUpdatedBody', { count: picked.length })
+        );
+    }, [addToQueue, t]);
 
     const handleOpenPlaylistModal = useCallback(() => setPlaylistModalOpen(true), []);
 
     const handleShareSelected = useCallback(async () => {
         const idSet = new Set(selectedIdsRef.current);
-        const picked = tracksRef.current.filter((t) => idSet.has(t.id));
+        const picked = tracksRef.current.filter((item) => idSet.has(item.id));
         if (picked.length === 0) return;
         if (!(await Sharing.isAvailableAsync())) {
-            Alert.alert('Compartir', 'No disponible en este dispositivo.');
+            Alert.alert(t('common.share'), t('songs.shareUnavailable'));
             return;
         }
         // expo-sharing comparte un archivo a la vez en Android
         if (picked.length > 1) {
             Alert.alert(
-                'Compartir',
-                `Android permite compartir 1 archivo por vez. Se compartirá "${picked[0].title}".`,
+                t('common.share'),
+                t('songs.shareSingleAndroid', { title: picked[0].title }),
                 [
-                    { text: 'Cancelar', style: 'cancel' },
+                    { text: t('common.cancel'), style: 'cancel' },
                     {
-                        text: 'Compartir',
+                        text: t('common.share'),
                         onPress: async () => {
                             const uri = picked[0].uri;
                             setSelectedIds([]);
@@ -628,24 +635,30 @@ export const SongsScreen: React.FC = () => {
         const uri = picked[0].uri;
         setSelectedIds([]);
         await Sharing.shareAsync(uri);
-    }, []);
+    }, [t]);
 
     const handleDeleteSelected = useCallback(() => {
         const idsToDelete = [...selectedIdsRef.current];
         if (idsToDelete.length === 0) return;
         Alert.alert(
-            'Mover a papelera',
-            `¿Mover ${idsToDelete.length} ${idsToDelete.length === 1 ? 'canción' : 'canciones'} a Eliminados recientemente?`,
+            t('songs.moveToTrashTitle'),
+            t('songs.moveToTrashConfirm', {
+                count: idsToDelete.length,
+                unit:
+                    idsToDelete.length === 1
+                        ? t('common.songSingular')
+                        : t('common.songPlural'),
+            }),
             [
-                { text: 'Cancelar', style: 'cancel' },
+                { text: t('common.cancel'), style: 'cancel' },
                 {
-                    text: 'Mover a papelera',
+                    text: t('songs.moveToTrashTitle'),
                     style: 'destructive',
                     onPress: () => {
                         // Desactiva el selector y quita las pistas de la UI al instante
                         const idSet = new Set(idsToDelete);
                         setSelectedIds([]);
-                        setTracks((prev) => prev.filter((t) => !idSet.has(t.id)));
+                        setTracks((prev) => prev.filter((item) => !idSet.has(item.id)));
                         softDeleteTracks(idsToDelete)
                             .then(() => setLibraryVersion((v) => v + 1))
                             .catch(() => { });
@@ -653,7 +666,7 @@ export const SongsScreen: React.FC = () => {
                 },
             ]
         );
-    }, []);
+    }, [t]);
 
     // Evento de scroll 100% en hilo nativo UI para la barra blanca deslizante
     const onPagerScroll = useMemo(
@@ -745,7 +758,7 @@ export const SongsScreen: React.FC = () => {
                                             { color: isActive ? fgColor : mutedColor },
                                         ]}
                                     >
-                                        {tab.label}
+                                        {t(tab.labelKey)}
                                     </Text>
                                 </TouchableOpacity>
                             );
@@ -770,10 +783,12 @@ export const SongsScreen: React.FC = () => {
             ) : permissionDenied ? (
                 <View style={styles.centered}>
                     <Text style={[styles.statusText, { color: mutedColor }]}>
-                        {errorMessage ? `Error: ${errorMessage}` : 'Se requiere permiso para leer tu música local.'}
+                        {errorMessage
+                            ? `${t('common.error')}: ${errorMessage}`
+                            : t('songs.permissionRequired')}
                     </Text>
                     <TouchableOpacity style={styles.retryButton} onPress={() => loadLibrary(sortBy, true)}>
-                        <Text style={styles.retryText}>Conceder permiso</Text>
+                        <Text style={styles.retryText}>{t('songs.grantPermission')}</Text>
                     </TouchableOpacity>
                 </View>
             ) : (
@@ -909,6 +924,7 @@ export const SongsScreen: React.FC = () => {
                     setSettingsOpen(false);
                     refreshTracks();
                 }}
+                onOpenPlayer={openPlayer}
             />
             <MiniPlayer onExpand={openPlayer} />
             <FullPlayerModal

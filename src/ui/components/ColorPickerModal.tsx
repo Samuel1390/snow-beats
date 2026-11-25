@@ -14,6 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Check } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useI18n } from '../../i18n';
 
 type ColorFormat = 'RGB' | 'HEX' | 'HSL';
 
@@ -143,6 +144,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
         onConfirmGradient,
     }) => {
         const insets = useSafeAreaInsets();
+        const { t } = useI18n();
         const [activeStop, setActiveStop] = useState<0 | 1>(0);
         const [colors, setColors] = useState<[string, string]>([
             initialColor,
@@ -312,7 +314,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
 
             const nums = next.map((v) => (v === '' ? NaN : parseInt(v, 10)));
             if (nums.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
-                setValidationError('RGB requiere valores enteros entre 0 y 255.');
+                setValidationError(t('colorPicker.rgbError'));
                 return;
             }
             const [r, g, b] = nums;
@@ -330,7 +332,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
             const normalized = (raw.startsWith('#') ? raw : `#${raw}`).toUpperCase().slice(0, 7);
             setHexInput(normalized);
             if (!/^#[0-9A-F]{6}$/.test(normalized)) {
-                setValidationError('Formato HEX válido: #RRGGBB (6 dígitos hexadecimales).');
+                setValidationError(t('colorPicker.hexError'));
                 return;
             }
             const [r, g, b] = hexToRgb(normalized);
@@ -361,7 +363,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
                 lVal < 0 ||
                 lVal > 100
             ) {
-                setValidationError('HSL requiere H (0-360), S (0-100%) y L (0-100%).');
+                setValidationError(t('colorPicker.hslError'));
                 return;
             }
             const [r, g, b] = hslToRgb(hVal, sVal, lVal);
@@ -406,7 +408,9 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
                             <ArrowLeft size={23} color="#FFFFFF" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>
-                            {mode === 'gradient' ? 'Gradiente personalizado' : 'Color personalizado'}
+                            {mode === 'gradient'
+                                ? t('colorPicker.customGradient')
+                                : t('colorPicker.customColor')}
                         </Text>
                         <TouchableOpacity
                             style={[styles.checkBtn, Boolean(validationError) && { opacity: 0.4 }]}
@@ -435,14 +439,18 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
                                         onPress={() => handleSwitchStop(0)}
                                     >
                                         <View style={[styles.stopDot, { backgroundColor: colors[0] }]} />
-                                        <Text style={styles.stopTabText}>Color 1 (Arriba)</Text>
+                                        <Text style={styles.stopTabText}>
+                                            {t('colorPicker.colorTop')}
+                                        </Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         style={[styles.stopTab, activeStop === 1 && styles.stopTabActive]}
                                         onPress={() => handleSwitchStop(1)}
                                     >
                                         <View style={[styles.stopDot, { backgroundColor: colors[1] }]} />
-                                        <Text style={styles.stopTabText}>Color 2 (Abajo)</Text>
+                                        <Text style={styles.stopTabText}>
+                                            {t('colorPicker.colorBottom')}
+                                        </Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -490,7 +498,7 @@ export const ColorPickerModal: React.FC<ColorPickerModalProps> = React.memo(
                         {/* 3. Clásica Barra Cromática Arcoíris (Hue 0° - 360°) */}
                         <View style={styles.hueSection}>
                             <View style={styles.hueHeaderRow}>
-                                <Text style={styles.sliderHint}>Barra cromática</Text>
+                                <Text style={styles.sliderHint}>{t('colorPicker.hueBar')}</Text>
                                 <Text style={styles.hueDegreeText}>{Math.round(hsv[0])}°</Text>
                             </View>
                             <View

@@ -17,6 +17,7 @@ import {
 } from '../../storage/database/db';
 import { AnimatedBottomSheet } from './AnimatedBottomSheet';
 import { CollageArtwork } from './CollageArtWork';
+import { useI18n } from '../../i18n';
 
 interface AddToPlaylistModalProps {
     visible: boolean;
@@ -31,6 +32,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
     onClose,
     onAdded,
 }) => {
+    const { t } = useI18n();
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [creating, setCreating] = useState(false);
     const [newName, setNewName] = useState('');
@@ -55,7 +57,10 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
             onAdded?.(playlist.name, added);
             onClose();
             if (added === 0) {
-                Alert.alert('Playlist', `Las canciones ya estaban en "${playlist.name}".`);
+                Alert.alert(
+                    t('selection.playlist'),
+                    t('playlists.alreadyInPlaylist', { name: playlist.name })
+                );
             }
         } finally {
             setSaving(false);
@@ -83,10 +88,12 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
         <AnimatedBottomSheet visible={visible} onClose={onClose} avoidKeyboard sheetStyle={styles.sheet}>
             <View style={styles.header}>
                 <View style={{ flex: 1 }}>
-                    <Text style={styles.title}>Agregar a playlist</Text>
+                    <Text style={styles.title}>{t('playlists.addToTitle')}</Text>
                     <Text style={styles.subtitle}>
                         {trackIds.length}{' '}
-                        {trackIds.length === 1 ? 'canción seleccionada' : 'canciones seleccionadas'}
+                        {trackIds.length === 1
+                            ? t('playlists.selectedCountSingular')
+                            : t('playlists.selectedCountPlural')}
                     </Text>
                 </View>
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -99,7 +106,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
                 <View style={styles.createBox}>
                     <TextInput
                         style={styles.input}
-                        placeholder="Nombre de la nueva playlist"
+                        placeholder={t('playlists.newNamePlaceholder')}
                         placeholderTextColor="#9CA3AF"
                         value={newName}
                         onChangeText={setNewName}
@@ -108,14 +115,14 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
                     />
                     <View style={styles.createActions}>
                         <TouchableOpacity onPress={() => setCreating(false)} style={styles.cancelBtn}>
-                            <Text style={styles.cancelText}>Cancelar</Text>
+                            <Text style={styles.cancelText}>{t('common.cancel')}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={handleCreateAndAdd}
                             style={styles.confirmBtn}
                             disabled={saving || !newName.trim()}
                         >
-                            <Text style={styles.confirmText}>Crear y agregar</Text>
+                            <Text style={styles.confirmText}>{t('playlists.createAndAdd')}</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -124,7 +131,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
                     <View style={styles.newIconBox}>
                         <Plus size={18} color="#000000" />
                     </View>
-                    <Text style={styles.newText}>Nueva playlist</Text>
+                    <Text style={styles.newText}>{t('playlists.newBtn')}</Text>
                 </TouchableOpacity>
             )}
 
@@ -149,14 +156,17 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
                                 {item.name}
                             </Text>
                             <Text style={styles.playlistCount}>
-                                {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
+                                {item.trackCount}{' '}
+                                {item.trackCount === 1
+                                    ? t('common.songSingular')
+                                    : t('common.songPlural')}
                             </Text>
                         </View>
                     </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                     <Text style={styles.emptyText}>
-                        Aún no tienes playlists manuales. Crea una arriba.
+                        {t('playlists.noManualPlaylists')}
                     </Text>
                 }
             />

@@ -18,6 +18,7 @@ import {
 } from '../../storage/database/db';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { SongCard } from './SongCard';
+import { useI18n } from '../../i18n/LanguageContext';
 
 interface SearchModalProps {
     visible: boolean;
@@ -51,6 +52,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     onSelectTrack,
 }) => {
     const { currentTrack, isPlaying } = usePlayer();
+    const { t } = useI18n();
     const [query, setQuery] = useState('');
     const [history, setHistory] = useState<string[]>([]);
     const [results, setResults] = useState<Track[]>([]);
@@ -114,7 +116,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     </TouchableOpacity>
                     <TextInput
                         style={styles.input}
-                        placeholder="Buscar título, artista o letra..."
+                        placeholder={t('search.placeholder')}
                         placeholderTextColor="#9CA3AF"
                         value={query}
                         onChangeText={runSearch}
@@ -132,9 +134,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
                 {query.trim().length === 0 ? (
                     <View style={styles.historyBox}>
-                        <Text style={styles.sectionTitle}>Búsquedas recientes (últimas 10)</Text>
+                        <Text style={styles.sectionTitle}>{t('search.recentTitle')}</Text>
                         {history.length === 0 ? (
-                            <Text style={styles.emptyText}>Sin historial de búsqueda.</Text>
+                            <Text style={styles.emptyText}>{t('search.noHistory')}</Text>
                         ) : (
                             history.map((item) => (
                                 <TouchableOpacity
@@ -162,16 +164,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                                     highlightQuery={query}
                                     isCurrentTrack={isCurrent}
                                     isPlaying={isCurrent && isPlaying}
-                                    onPress={async (t) => {
+                                    onPress={async (selected) => {
                                         await addSearchHistory(query);
-                                        onSelectTrack(t);
+                                        onSelectTrack(selected);
                                         onClose();
                                     }}
                                 />
                             );
                         }}
                         ListEmptyComponent={
-                            <Text style={styles.emptyText}>No se encontraron coincidencias.</Text>
+                            <Text style={styles.emptyText}>{t('search.noMatches')}</Text>
                         }
                     />
                 )}

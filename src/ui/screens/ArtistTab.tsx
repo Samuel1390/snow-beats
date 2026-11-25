@@ -11,6 +11,7 @@ import { ChevronRight } from 'lucide-react-native';
 import { CollageArtwork } from '../components/CollageArtWork';
 import { Track } from '../../types/music';
 import { useTheme } from '../../theme/ThemeContext';
+import { useI18n } from '../../i18n';
 import { TrackGroupDetail } from '../components/TrackGroupDetail';
 
 interface ArtistGroup {
@@ -35,44 +36,49 @@ const ArtistRow: React.FC<{
     fgColor: string;
     mutedColor: string;
     onSelect: (name: string) => void;
-}> = React.memo(({ item, fgColor, mutedColor, onSelect }) => (
-    <TouchableOpacity
-        style={styles.row}
-        activeOpacity={0.7}
-        onPress={() => onSelect(item.name)}
-    >
-        <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
-        <View style={styles.info}>
-            <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
-                {item.name}
-            </Text>
-            <Text style={{ color: mutedColor, fontSize: 12 }}>
-                {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
-            </Text>
-        </View>
-        <ChevronRight size={18} color={mutedColor} />
-    </TouchableOpacity>
-));
+}> = React.memo(({ item, fgColor, mutedColor, onSelect }) => {
+    const { t } = useI18n();
+    return (
+        <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => onSelect(item.name)}
+        >
+            <CollageArtwork artworks={item.recentArtworks} totalTracks={item.trackCount} />
+            <View style={styles.info}>
+                <Text style={[styles.name, { color: fgColor }]} numberOfLines={1}>
+                    {item.name}
+                </Text>
+                <Text style={{ color: mutedColor, fontSize: 12 }}>
+                    {item.trackCount}{' '}
+                    {item.trackCount === 1 ? t('common.songSingular') : t('common.songPlural')}
+                </Text>
+            </View>
+            <ChevronRight size={18} color={mutedColor} />
+        </TouchableOpacity>
+    );
+});
 
 export const ArtistsTab: React.FC<ArtistsTabProps> = React.memo(
     ({ tracks, onOpenPlayer, onLibraryChanged, refreshing = false, onRefresh }) => {
         const { fgColor, mutedColor } = useTheme();
+        const { t } = useI18n();
         const [openedArtistName, setOpenedArtistName] = useState<string | null>(null);
 
         // Agrupación O(N) en una sola pasada en memoria (~1-2ms para 1300+ pistas, sin bloquear SQLite)
         const artists = useMemo<ArtistGroup[]>(() => {
             const map = new Map<string, ArtistGroup>();
             for (let i = 0; i < tracks.length; i++) {
-                const t = tracks[i];
-                let entry = map.get(t.artist);
+                const track = tracks[i];
+                let entry = map.get(track.artist);
                 if (!entry) {
-                    entry = { name: t.artist, trackCount: 0, recentArtworks: [], tracks: [] };
-                    map.set(t.artist, entry);
+                    entry = { name: track.artist, trackCount: 0, recentArtworks: [], tracks: [] };
+                    map.set(track.artist, entry);
                 }
                 entry.trackCount += 1;
-                entry.tracks.push(t);
-                if (t.artworkUri && entry.recentArtworks.length < 4) {
-                    entry.recentArtworks.push(t.artworkUri);
+                entry.tracks.push(track);
+                if (track.artworkUri && entry.recentArtworks.length < 4) {
+                    entry.recentArtworks.push(track.artworkUri);
                 }
             }
             return Array.from(map.values()).sort(
@@ -159,7 +165,7 @@ export const ArtistsTab: React.FC<ArtistsTabProps> = React.memo(
                 renderItem={renderItem}
                 ListEmptyComponent={
                     <Text style={[styles.fallbackText, { color: mutedColor }]}>
-                        No hay artistas disponibles.
+                        {t('artists.empty')}
                     </Text>
                 }
             />

@@ -54,6 +54,7 @@ import { LyricsSheetModal } from '../components/LyricsSheetModal';
 import { LyricsEditorModal } from '../components/LyricsEditorModal';
 import { EditTrackModal } from '../components/EditTrackModal';
 import { ShareCardModal } from '../components/ShareCardModal';
+import { useI18n } from '../../i18n/LanguageContext';
 
 function formatTime(sec: number): string {
     const m = Math.floor(sec / 60);
@@ -127,7 +128,9 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             hideCurrentTrack,
             deleteCurrentTrack,
             updateCurrentTrack,
+            createQuickAlarmForTrack,
         } = usePlayer();
+        const { t } = useI18n();
 
         const { width: screenWidth, height: screenHeight } = useWindowDimensions();
         const [mounted, setMounted] = useState(visible);
@@ -452,7 +455,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(currentTrack.uri);
             } else {
-                Alert.alert('Compartir', 'No disponible en este dispositivo.');
+                Alert.alert(t('common.share'), t('songs.shareUnavailable'));
             }
         };
 
@@ -600,7 +603,12 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                         <Animated.View style={[styles.footerRow, { opacity: openAnim }]}>
                             <TouchableOpacity
                                 style={styles.footerBtn}
-                                onPress={() => Alert.alert('Ecualizador', 'Módulo nativo listo para la siguiente fase.')}
+                                onPress={() =>
+                                    Alert.alert(
+                                        t('player.equalizerTitle'),
+                                        t('player.equalizerBody')
+                                    )
+                                }
                             >
                                 <Sliders size={22} color={palette.foreground} />
                             </TouchableOpacity>
@@ -647,7 +655,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 }}
                             >
                                 <Pencil size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Editar datos</Text>
+                                <Text style={styles.sheetText}>{t('player.editData')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -657,7 +665,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 }}
                             >
                                 <Plus size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Agregar a playlist</Text>
+                                <Text style={styles.sheetText}>{t('player.addToPlaylist')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -672,11 +680,11 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 }}
                             >
                                 <Share2 size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Compartir tarjeta</Text>
+                                <Text style={styles.sheetText}>{t('player.shareCard')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.sheetItem} onPress={handleShare}>
                                 <Forward size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Compartir archivo de audio</Text>
+                                <Text style={styles.sheetText}>{t('player.shareAudioFile')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -687,28 +695,45 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             >
                                 <Gauge size={20} color="#FFFFFF" />
                                 <Text style={styles.sheetText}>
-                                    Velocidad ({playbackRate}x) y Tono ({pitch}x)
+                                    {t('player.speedAndPitch', {
+                                        speed: playbackRate,
+                                        pitch,
+                                    })}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
                                 onPress={() => {
                                     setMenuOpen(false);
-                                    Alert.alert('Tono de llamada', 'Requiere módulo nativo WRITE_SETTINGS.');
+                                    Alert.alert(
+                                        t('player.ringtoneTitle'),
+                                        t('player.ringtoneBody')
+                                    );
                                 }}
                             >
                                 <BellRing size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Establecer como tono de llamada</Text>
+                                <Text style={styles.sheetText}>{t('player.setRingtone')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
-                                onPress={() => {
+                                onPress={async () => {
                                     setMenuOpen(false);
-                                    Alert.alert('Alarma', 'Requiere módulo nativo de alarma.');
+                                    const created = await createQuickAlarmForTrack(currentTrack);
+                                    const timeStr = `${String(created.hour).padStart(
+                                        2,
+                                        '0'
+                                    )}:${String(created.minute).padStart(2, '0')}`;
+                                    Alert.alert(
+                                        t('player.alarmCreatedTitle'),
+                                        t('player.alarmCreatedBody', {
+                                            time: timeStr,
+                                            title: currentTrack.title,
+                                        })
+                                    );
                                 }}
                             >
                                 <AlarmClock size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Configurar como alarma / Temporizador</Text>
+                                <Text style={styles.sheetText}>{t('player.setAlarmTimer')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.sheetItem}
@@ -718,12 +743,12 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                 }}
                             >
                                 <EyeOff size={20} color="#FFFFFF" />
-                                <Text style={styles.sheetText}>Ocultar canción</Text>
+                                <Text style={styles.sheetText}>{t('player.hideSong')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.sheetItem} onPress={handleDeletePress}>
                                 <Trash2 size={20} color="#F87171" />
                                 <Text style={[styles.sheetText, { color: '#F87171' }]}>
-                                    Eliminar del dispositivo
+                                    {t('player.deleteFromDevice')}
                                 </Text>
                             </TouchableOpacity>
                         </AnimatedBottomSheet>
@@ -731,7 +756,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                         {/* Modal de Velocidad y Tono con slide-in / slide-out */}
                         <AnimatedBottomSheet visible={speedOpen} onClose={() => setSpeedOpen(false)}>
                             <Text style={styles.sheetTitle}>
-                                Velocidad: {playbackRate.toFixed(1)}x (tono preservado)
+                                {t('player.speedLabel', { speed: playbackRate.toFixed(1) })}
                             </Text>
                             <Slider
                                 minimumValue={0.5}
@@ -745,7 +770,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                             />
 
                             <Text style={[styles.sheetTitle, { marginTop: 16 }]}>
-                                Tono (Pitch): {pitch.toFixed(1)}x
+                                {t('player.pitchLabel', { pitch: pitch.toFixed(1) })}
                             </Text>
                             <Slider
                                 minimumValue={0.5}
@@ -765,7 +790,9 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                     setPitchValue(1);
                                 }}
                             >
-                                <Text style={{ color: '#38BDF8', fontWeight: '700' }}>Restablecer (1.0x)</Text>
+                                <Text style={{ color: '#38BDF8', fontWeight: '700' }}>
+                                    {t('player.resetSpeedPitch')}
+                                </Text>
                             </TouchableOpacity>
                         </AnimatedBottomSheet>
 
@@ -773,14 +800,18 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                         <Modal visible={deleteOpen} transparent animationType="fade" onRequestClose={() => setDeleteOpen(false)}>
                             <View style={styles.centerBackdrop}>
                                 <View style={styles.confirmCard}>
-                                    <Text style={styles.sheetTitle}>¿Mover a Eliminados recientemente?</Text>
+                                    <Text style={styles.sheetTitle}>{t('player.deleteConfirmTitle')}</Text>
                                     <View style={styles.checkRow}>
                                         <Switch value={askDeleteAgain} onValueChange={setAskDeleteAgain} />
-                                        <Text style={{ color: '#D1D5DB', marginLeft: 10 }}>Volver a mostrar este aviso</Text>
+                                        <Text style={{ color: '#D1D5DB', marginLeft: 10 }}>
+                                            {t('player.askDeleteAgain')}
+                                        </Text>
                                     </View>
                                     <View style={styles.confirmActions}>
                                         <TouchableOpacity onPress={() => setDeleteOpen(false)}>
-                                            <Text style={{ color: '#9CA3AF', padding: 10 }}>Cancelar</Text>
+                                            <Text style={{ color: '#9CA3AF', padding: 10 }}>
+                                                {t('common.cancel')}
+                                            </Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
                                             onPress={() => {
@@ -789,7 +820,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                                             }}
                                         >
                                             <Text style={{ color: '#F87171', fontWeight: '700', padding: 10 }}>
-                                                Mover a papelera
+                                                {t('songs.moveToTrashTitle')}
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
