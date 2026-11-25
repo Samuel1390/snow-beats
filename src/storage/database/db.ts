@@ -71,6 +71,11 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS listening_buckets (
+      bucket_ts INTEGER PRIMARY KEY NOT NULL,
+      seconds INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tracks_visible ON tracks(is_deleted, is_hidden, creation_time DESC);
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pid ON playlist_tracks(playlist_id, position DESC);
   `);
@@ -80,6 +85,24 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN last_played_at INTEGER DEFAULT 0`); } catch { }
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN dominant_color TEXT`); } catch { }
   try { await db.execAsync(`ALTER TABLE tracks ADD COLUMN is_custom_edited INTEGER DEFAULT 0`); } catch { }
+
+  // Registra la fecha/hora de instalación de la app si aún no existe
+  const existingInstall = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = 'app_installed_at'`
+  );
+  if (!existingInstall?.value) {
+    const earliest = await db.getFirstAsync<{ min_ts: number | null }>(
+      `SELECT MIN(last_played_at) AS min_ts FROM tracks WHERE last_played_at > 0`
+    );
+    const now = Date.now();
+    const minTs = earliest?.min_ts && earliest.min_ts > 0 && earliest.min_ts < now
+      ? earliest.min_ts
+      : now;
+    await db.runAsync(
+      `INSERT OR IGNORE INTO app_settings (key, value) VALUES ('app_installed_at', ?)`,
+      [String(minTs)]
+    );
+  }
 
   dbInstance = db;
   return db;
@@ -635,13 +658,21 @@ export interface TopArtistStat {
   artworkUri: string | null;
 }
 
+export interface ListeningBucket {
+  ts: number; // epoch ms (inicio del bloque de 1 min)
+  seconds: number;
+}
+
 export interface ListeningStats {
   totalSeconds: number;
   todaySeconds: number;
   totalPlays: number;
+  otherPlays: number;
   totalTracks: number;
   favoritesCount: number;
   withLyricsCount: number;
+  installedAt: number;
+  buckets: ListeningBucket[];
   topTracks: Track[];
   topArtists: TopArtistStat[];
 }
@@ -665,6 +696,9 @@ interface StoredListeningTime {
   todaySeconds: number;
 }
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const BUCKET_SIZE_MS = 60 * 1000;
+
 function getLocalDateKey(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -687,10 +721,11 @@ function parseStoredListeningTime(raw: string | null): StoredListeningTime {
   }
 }
 
-// Acumula segundos reproducidos reales en SQLite local (total + hoy)
+// Acumula segundos reproducidos reales en SQLite local (total + hoy + historial últimos 30 días)
 export async function addListeningSeconds(seconds: number): Promise<void> {
   const delta = Math.floor(seconds);
   if (delta <= 0) return;
+  const db = await getDatabase();
   const current = parseStoredListeningTime(await getAppSetting('listening_stats'));
   const next: StoredListeningTime = {
     totalSeconds: current.totalSeconds + delta,
@@ -698,12 +733,52 @@ export async function addListeningSeconds(seconds: number): Promise<void> {
     todaySeconds: current.todaySeconds + delta,
   };
   await setAppSetting('listening_stats', JSON.stringify(next));
+
+  const now = Date.now();
+  const bucketTs = Math.floor(now / BUCKET_SIZE_MS) * BUCKET_SIZE_MS;
+  const cutoff = now - THIRTY_DAYS_MS;
+
+  await db.runAsync(
+    `INSERT INTO listening_buckets (bucket_ts, seconds) VALUES (?, ?)
+     ON CONFLICT(bucket_ts) DO UPDATE SET seconds = seconds + excluded.seconds`,
+    [bucketTs, delta]
+  );
+  await db.runAsync(`DELETE FROM listening_buckets WHERE bucket_ts < ?`, [cutoff]);
 }
 
 // Calcula el resumen completo de estadísticas locales de biblioteca y escucha
 export async function getListeningStats(): Promise<ListeningStats> {
   const db = await getDatabase();
   const timeData = parseStoredListeningTime(await getAppSetting('listening_stats'));
+
+  const now = Date.now();
+  const installedRaw = await getAppSetting('app_installed_at');
+  let installedAt = Number(installedRaw);
+  if (!Number.isFinite(installedAt) || installedAt <= 0 || installedAt > now) {
+    installedAt = now;
+    await setAppSetting('app_installed_at', String(installedAt));
+  }
+
+  const cutoff = now - THIRTY_DAYS_MS;
+  const bucketRows = await db.getAllAsync<{ bucket_ts: number; seconds: number }>(
+    `SELECT bucket_ts, seconds FROM listening_buckets
+     WHERE bucket_ts >= ?
+     ORDER BY bucket_ts ASC`,
+    [cutoff]
+  );
+
+  const buckets: ListeningBucket[] = bucketRows.map((r) => ({
+    ts: Number(r.bucket_ts),
+    seconds: Math.max(0, Number(r.seconds) || 0),
+  }));
+
+  // Si ya existía tiempo acumulado previo a la tabla de historial, reflejarlo en la línea actual
+  if (buckets.length === 0 && timeData.totalSeconds > 0) {
+    buckets.push({
+      ts: Math.max(installedAt, now - BUCKET_SIZE_MS),
+      seconds: timeData.totalSeconds,
+    });
+  }
 
   const summary = await db.getFirstAsync<{
     total_plays: number | null;
@@ -746,14 +821,22 @@ export async function getListeningStats(): Promise<ListeningStats> {
      LIMIT 5`
   );
 
+  const topTracks = topTrackRows.map(mapRowToTrack);
+  const totalPlays = summary?.total_plays ?? 0;
+  const top5Plays = topTracks.reduce((acc, item) => acc + (item.playCount || 0), 0);
+  const otherPlays = Math.max(0, totalPlays - top5Plays);
+
   return {
     totalSeconds: timeData.totalSeconds,
     todaySeconds: timeData.todaySeconds,
-    totalPlays: summary?.total_plays ?? 0,
+    totalPlays,
+    otherPlays,
     totalTracks: summary?.total_tracks ?? 0,
     favoritesCount: summary?.favorites_count ?? 0,
     withLyricsCount: summary?.with_lyrics_count ?? 0,
-    topTracks: topTrackRows.map(mapRowToTrack),
+    installedAt,
+    buckets,
+    topTracks,
     topArtists: artistRows.map((r) => ({
       artist: r.artist,
       totalPlays: r.total_plays,
@@ -772,6 +855,7 @@ export async function resetListeningStats(): Promise<void> {
     todaySeconds: 0,
   };
   await setAppSetting('listening_stats', JSON.stringify(empty));
+  await db.runAsync(`DELETE FROM listening_buckets`);
   await db.runAsync(`UPDATE tracks SET play_count = 0, last_played_at = 0`);
 }
 

@@ -84,23 +84,22 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
         });
     }, [isDarkMode]);
 
-    // Aplica una imagen mostrando loader encima de la tarjeta elegida y bloqueando spam de toques
+    // Selección instantánea de imagen sin bloqueos ni remounts innecesarios
     const handleSelectImageTheme = useCallback(
-        (key: string, patch: Partial<ThemeConfig>) => {
-            if (loadingImageKey !== null) return;
-            setLoadingImageKey(key);
-            if (loaderTimerRef.current) clearTimeout(loaderTimerRef.current);
-            // Respaldo máximo para liberar el loader si la imagen ya estaba en caché instantánea
-            loaderTimerRef.current = setTimeout(() => {
-                loaderTimerRef.current = null;
-                setLoadingImageKey(null);
-            }, 420);
-
-            requestAnimationFrame(() => {
-                updateTheme(patch);
-            });
+        (key: string, patch: Partial<ThemeConfig>, isRemoteOrCustom = false) => {
+            if (isRemoteOrCustom) {
+                setLoadingImageKey(key);
+                if (loaderTimerRef.current) clearTimeout(loaderTimerRef.current);
+                loaderTimerRef.current = setTimeout(() => {
+                    loaderTimerRef.current = null;
+                    setLoadingImageKey(null);
+                }, 260);
+            } else {
+                clearImageLoader();
+            }
+            updateTheme(patch);
         },
-        [loadingImageKey, updateTheme]
+        [clearImageLoader, updateTheme]
     );
 
     const customSolids = theme.customSolidColors ?? [];
@@ -456,23 +455,27 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                 <View key={img.uri} style={styles.savedImgWrap}>
                                     <TouchableOpacity
                                         activeOpacity={0.85}
-                                        disabled={loadingImageKey !== null}
                                         style={[
                                             styles.savedImageRect,
                                             isSelected && styles.savedImageRectSelected,
                                         ]}
                                         onPress={() => {
                                             if (isSelected) return;
-                                            handleSelectImageTheme(itemKey, {
-                                                backgroundType: 'image',
-                                                customImage: img,
-                                                foregroundColor: '#FFFFFF',
-                                            });
+                                            handleSelectImageTheme(
+                                                itemKey,
+                                                {
+                                                    backgroundType: 'image',
+                                                    customImage: img,
+                                                    foregroundColor: '#FFFFFF',
+                                                },
+                                                true
+                                            );
                                         }}
                                     >
                                         <Image
                                             source={{ uri: img.uri }}
-                                            blurRadius={img.blur > 0 ? img.blur : undefined}
+                                            blurRadius={img.blur > 0 ? img.blur : 0}
+                                            fadeDuration={0}
                                             style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
@@ -499,7 +502,6 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         )}
                                         <TouchableOpacity
                                             style={styles.imgEditBadge}
-                                            disabled={loadingImageKey !== null}
                                             onPress={() => setPendingImage(img)}
                                         >
                                             <Pencil size={12} color="#FFFFFF" />
@@ -519,41 +521,38 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                             const isSelected =
                                 theme.backgroundType === 'image' &&
                                 theme.customImage?.presetId === preset.id;
-                            const isLoadingThis = loadingImageKey === itemKey;
                             const source = isDarkMode ? preset.dark : preset.light;
                             return (
-                                <View key={`${preset.id}-${variantTag}`} style={styles.savedImgWrap}>
+                                <View key={preset.id} style={styles.savedImgWrap}>
                                     <TouchableOpacity
                                         activeOpacity={0.85}
-                                        disabled={loadingImageKey !== null}
                                         style={[
                                             styles.savedImageRect,
                                             isSelected && styles.savedImageRectSelected,
                                         ]}
                                         onPress={() => {
                                             if (isSelected) return;
-                                            handleSelectImageTheme(itemKey, {
-                                                backgroundType: 'image',
-                                                customImage: {
-                                                    presetId: preset.id,
-                                                    blur: 0,
-                                                    brightness: 100,
+                                            handleSelectImageTheme(
+                                                itemKey,
+                                                {
+                                                    backgroundType: 'image',
+                                                    customImage: {
+                                                        presetId: preset.id,
+                                                        blur: 0,
+                                                        brightness: 100,
+                                                    },
                                                 },
-                                            });
+                                                false
+                                            );
                                         }}
                                     >
                                         <Image
-                                            key={`img-${preset.id}-${variantTag}`}
                                             source={source}
+                                            fadeDuration={0}
                                             style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
-                                        {isLoadingThis && (
-                                            <View style={styles.imgLoaderOverlay}>
-                                                <ActivityIndicator size="small" color="#FFFFFF" />
-                                            </View>
-                                        )}
-                                        {isSelected && !isLoadingThis && (
+                                        {isSelected && (
                                             <View style={styles.imgCheckBadge}>
                                                 <Check size={14} color="#FFFFFF" />
                                             </View>
@@ -561,7 +560,6 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         {/* Permite ajustar brillo y blur incluso sobre un fondo predeterminado */}
                                         <TouchableOpacity
                                             style={styles.imgEditBadge}
-                                            disabled={loadingImageKey !== null}
                                             onPress={() =>
                                                 setPendingImage({
                                                     presetId: preset.id,

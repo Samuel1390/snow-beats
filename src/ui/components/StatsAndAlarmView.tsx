@@ -19,7 +19,6 @@ import {
     BarChart3,
     ChevronDown,
     ChevronUp,
-    Clock,
     Disc3,
     FileText,
     Heart,
@@ -44,6 +43,12 @@ import {
 import { Track } from '../../types/music';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { useI18n } from '../../i18n/LanguageContext';
+import {
+    ListeningTimelineChart,
+    TopFirstFireRow,
+    TopSongsDonutChart,
+    useStatsPalette,
+} from './StatsCharts';
 
 interface StatsAndAlarmViewProps {
     onBack: () => void;
@@ -51,16 +56,6 @@ interface StatsAndAlarmViewProps {
 }
 
 const ORDERED_WEEKDAYS = [1, 2, 3, 4, 5, 6, 0] as const;
-
-function formatDurationHuman(totalSec: number): string {
-    const safe = Math.max(0, Math.floor(totalSec));
-    const hours = Math.floor(safe / 3600);
-    const minutes = Math.floor((safe % 3600) / 60);
-    const seconds = safe % 60;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    if (minutes > 0) return `${minutes}m`;
-    return `${seconds}s`;
-}
 
 function formatAlarmTime(hour: number, minute: number): string {
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
@@ -113,10 +108,12 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
     const { alarms, saveAlarmsList, playTrack } = usePlayer();
     const { t } = useI18n();
     const insets = useSafeAreaInsets();
+    const palette = useStatsPalette();
 
     const [activeTab, setActiveTab] = useState<'stats' | 'alarms'>('stats');
     const [stats, setStats] = useState<ListeningStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
+    const [isScrubbingChart, setIsScrubbingChart] = useState(false);
 
     // Estado del editor de alarma
     const [editorVisible, setEditorVisible] = useState(false);
@@ -323,25 +320,31 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
     );
 
     return (
-        <View style={styles.root}>
+        <View style={[styles.root, { backgroundColor: palette.screenBg }]}>
             {/* Cabecera */}
-            <View style={styles.header}>
+            <View style={[styles.header, { borderBottomColor: palette.divider }]}>
                 <TouchableOpacity onPress={onBack} style={styles.iconBtn}>
-                    <ArrowLeft size={22} color="#FFFFFF" />
+                    <ArrowLeft size={22} color={palette.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>{t('settings.stats.title')}</Text>
+                <Text style={[styles.headerTitle, { color: palette.text }]}>
+                    {t('settings.stats.title')}
+                </Text>
             </View>
 
             {/* Pestañas segmentadas Estadísticas | Alarma musical */}
-            <View style={styles.segmented}>
+            <View style={[styles.segmented, { backgroundColor: palette.segmentedBg }]}>
                 <TouchableOpacity
                     style={[styles.segmentBtn, activeTab === 'stats' && styles.segmentBtnActive]}
                     onPress={() => setActiveTab('stats')}
                 >
-                    <BarChart3 size={15} color={activeTab === 'stats' ? '#FFFFFF' : '#A1A1AA'} />
+                    <BarChart3
+                        size={15}
+                        color={activeTab === 'stats' ? '#FFFFFF' : palette.muted}
+                    />
                     <Text
                         style={[
                             styles.segmentText,
+                            { color: palette.muted },
                             activeTab === 'stats' && styles.segmentTextActive,
                         ]}
                     >
@@ -353,10 +356,14 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                     style={[styles.segmentBtn, activeTab === 'alarms' && styles.segmentBtnActive]}
                     onPress={() => setActiveTab('alarms')}
                 >
-                    <AlarmClock size={15} color={activeTab === 'alarms' ? '#FFFFFF' : '#A1A1AA'} />
+                    <AlarmClock
+                        size={15}
+                        color={activeTab === 'alarms' ? '#FFFFFF' : palette.muted}
+                    />
                     <Text
                         style={[
                             styles.segmentText,
+                            { color: palette.muted },
                             activeTab === 'alarms' && styles.segmentTextActive,
                         ]}
                     >
@@ -369,130 +376,251 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    scrollEnabled={!isScrubbingChart}
                 >
                     {loadingStats || !stats ? (
                         <View style={styles.loaderBox}>
-                            <ActivityIndicator size="large" color="#38BDF8" />
+                            <ActivityIndicator size="large" color={palette.accent} />
                         </View>
                     ) : (
                         <>
-                            {/* Tarjeta hero de tiempo total escuchado */}
-                            <View style={styles.heroCard}>
-                                <View style={styles.heroTopRow}>
-                                    <View style={styles.heroIconWrap}>
-                                        <Clock size={20} color="#60A5FA" />
-                                    </View>
-                                    <View style={styles.todayChip}>
-                                        <Text style={styles.todayChipText}>
-                                            {t('stats.todayBadge', {
-                                                time: formatDurationHuman(stats.todaySeconds),
-                                            })}
-                                        </Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.heroValue}>
-                                    {formatDurationHuman(stats.totalSeconds)}
-                                </Text>
-                                <Text style={styles.heroLabel}>
-                                    {t('stats.totalListeningTitle')}
-                                </Text>
-                            </View>
+                            {/* Gráfica interactiva: Eje X tiempo transcurrido (0-1h..30d), Eje Y tiempo de reproducción */}
+                            <ListeningTimelineChart
+                                installedAt={stats.installedAt}
+                                buckets={stats.buckets}
+                                totalSeconds={stats.totalSeconds}
+                                todaySeconds={stats.todaySeconds}
+                                palette={palette}
+                                onScrubStateChange={setIsScrubbingChart}
+                            />
 
                             {/* Cuadrícula de 4 KPIs */}
                             <View style={styles.kpiGrid}>
-                                <View style={styles.kpiCard}>
-                                    <Play size={18} color="#38BDF8" />
-                                    <Text style={styles.kpiValue}>{stats.totalPlays}</Text>
-                                    <Text style={styles.kpiLabel}>{t('stats.totalPlays')}</Text>
+                                <View
+                                    style={[
+                                        styles.kpiCard,
+                                        {
+                                            backgroundColor: palette.cardBg,
+                                            borderColor: palette.cardBorder,
+                                        },
+                                    ]}
+                                >
+                                    <Play size={18} color={palette.accent} />
+                                    <Text style={[styles.kpiValue, { color: palette.text }]}>
+                                        {stats.totalPlays}
+                                    </Text>
+                                    <Text style={[styles.kpiLabel, { color: palette.muted }]}>
+                                        {t('stats.totalPlays')}
+                                    </Text>
                                 </View>
-                                <View style={styles.kpiCard}>
+                                <View
+                                    style={[
+                                        styles.kpiCard,
+                                        {
+                                            backgroundColor: palette.cardBg,
+                                            borderColor: palette.cardBorder,
+                                        },
+                                    ]}
+                                >
                                     <Disc3 size={18} color="#60A5FA" />
-                                    <Text style={styles.kpiValue}>{stats.totalTracks}</Text>
-                                    <Text style={styles.kpiLabel}>{t('stats.libraryTracks')}</Text>
+                                    <Text style={[styles.kpiValue, { color: palette.text }]}>
+                                        {stats.totalTracks}
+                                    </Text>
+                                    <Text style={[styles.kpiLabel, { color: palette.muted }]}>
+                                        {t('stats.libraryTracks')}
+                                    </Text>
                                 </View>
-                                <View style={styles.kpiCard}>
+                                <View
+                                    style={[
+                                        styles.kpiCard,
+                                        {
+                                            backgroundColor: palette.cardBg,
+                                            borderColor: palette.cardBorder,
+                                        },
+                                    ]}
+                                >
                                     <Heart size={18} color="#F472B6" />
-                                    <Text style={styles.kpiValue}>{stats.favoritesCount}</Text>
-                                    <Text style={styles.kpiLabel}>{t('stats.favoritesCount')}</Text>
+                                    <Text style={[styles.kpiValue, { color: palette.text }]}>
+                                        {stats.favoritesCount}
+                                    </Text>
+                                    <Text style={[styles.kpiLabel, { color: palette.muted }]}>
+                                        {t('stats.favoritesCount')}
+                                    </Text>
                                 </View>
-                                <View style={styles.kpiCard}>
-                                    <FileText size={18} color="#34D399" />
-                                    <Text style={styles.kpiValue}>{stats.withLyricsCount}</Text>
-                                    <Text style={styles.kpiLabel}>{t('stats.withLyricsCount')}</Text>
+                                <View
+                                    style={[
+                                        styles.kpiCard,
+                                        {
+                                            backgroundColor: palette.cardBg,
+                                            borderColor: palette.cardBorder,
+                                        },
+                                    ]}
+                                >
+                                    <FileText size={18} color="#10B981" />
+                                    <Text style={[styles.kpiValue, { color: palette.text }]}>
+                                        {stats.withLyricsCount}
+                                    </Text>
+                                    <Text style={[styles.kpiLabel, { color: palette.muted }]}>
+                                        {t('stats.withLyricsCount')}
+                                    </Text>
                                 </View>
                             </View>
 
-                            {/* Top 5 canciones más escuchadas */}
+                            {/* Top 5 canciones más escuchadas + Gráfico de dona con colores dominantes + 6ª porción Otras */}
                             <View style={styles.sectionHeaderRow}>
-                                <Text style={styles.sectionTitle}>{t('stats.topSongsTitle')}</Text>
+                                <Text style={[styles.sectionTitle, { color: palette.text }]}>
+                                    {t('stats.topSongsTitle')}
+                                </Text>
                             </View>
 
                             {stats.topTracks.length === 0 ? (
-                                <View style={styles.emptyCard}>
-                                    <BarChart3 size={28} color="#52525B" />
-                                    <Text style={styles.emptyCardText}>
+                                <View
+                                    style={[
+                                        styles.emptyCard,
+                                        {
+                                            backgroundColor: palette.cardBg,
+                                            borderColor: palette.cardBorder,
+                                        },
+                                    ]}
+                                >
+                                    <BarChart3 size={28} color={palette.muted} />
+                                    <Text style={[styles.emptyCardText, { color: palette.muted }]}>
                                         {t('stats.emptyHistory')}
                                     </Text>
                                 </View>
                             ) : (
-                                <View style={styles.listCard}>
-                                    {stats.topTracks.map((track, idx) => (
-                                        <TouchableOpacity
-                                            key={track.id}
-                                            style={[
-                                                styles.rankRow,
-                                                idx > 0 && styles.rankRowBorder,
-                                            ]}
-                                            activeOpacity={0.78}
-                                            onPress={() => handlePlayTopTrack(track)}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.rankNumber,
-                                                    idx === 0 && styles.rankNumberFirst,
-                                                ]}
-                                            >
-                                                {idx + 1}
-                                            </Text>
-                                            {track.artworkUri ? (
-                                                <Image
-                                                    source={{ uri: track.artworkUri }}
-                                                    style={styles.trackThumb}
-                                                />
-                                            ) : (
-                                                <View style={styles.trackThumbFallback}>
-                                                    <Music size={18} color="#60A5FA" />
-                                                </View>
-                                            )}
-                                            <View style={styles.rankInfo}>
-                                                <Text style={styles.rankTitle} numberOfLines={1}>
-                                                    {track.title}
-                                                </Text>
-                                                <Text style={styles.rankSub} numberOfLines={1}>
-                                                    {track.artist}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.playPill}>
-                                                <Text style={styles.playPillText}>
-                                                    {t('stats.playsCount', {
-                                                        count: track.playCount,
-                                                    })}
-                                                </Text>
-                                            </View>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
+                                <>
+                                    <TopSongsDonutChart
+                                        topTracks={stats.topTracks}
+                                        otherPlays={stats.otherPlays}
+                                        totalPlays={stats.totalPlays}
+                                        palette={palette}
+                                    />
+
+                                    <View
+                                        style={[
+                                            styles.listCard,
+                                            {
+                                                backgroundColor: palette.cardBg,
+                                                borderColor: palette.cardBorder,
+                                            },
+                                        ]}
+                                    >
+                                        {stats.topTracks.map((track, idx) => {
+                                            const playsLabel = t('stats.playsCount', {
+                                                count: track.playCount,
+                                            });
+                                            if (idx === 0) {
+                                                return (
+                                                    <TopFirstFireRow
+                                                        key={track.id}
+                                                        track={track}
+                                                        playsLabel={playsLabel}
+                                                        onPress={() => handlePlayTopTrack(track)}
+                                                    />
+                                                );
+                                            }
+                                            return (
+                                                <TouchableOpacity
+                                                    key={track.id}
+                                                    style={[
+                                                        styles.rankRow,
+                                                        styles.rankRowBorder,
+                                                        { borderTopColor: palette.divider },
+                                                    ]}
+                                                    activeOpacity={0.78}
+                                                    onPress={() => handlePlayTopTrack(track)}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.rankNumber,
+                                                            { color: palette.muted },
+                                                        ]}
+                                                    >
+                                                        {idx + 1}
+                                                    </Text>
+                                                    {track.artworkUri ? (
+                                                        <Image
+                                                            source={{ uri: track.artworkUri }}
+                                                            style={styles.trackThumb}
+                                                        />
+                                                    ) : (
+                                                        <View
+                                                            style={[
+                                                                styles.trackThumbFallback,
+                                                                {
+                                                                    backgroundColor:
+                                                                        palette.subtleSurface,
+                                                                },
+                                                            ]}
+                                                        >
+                                                            <Music
+                                                                size={18}
+                                                                color={palette.accent}
+                                                            />
+                                                        </View>
+                                                    )}
+                                                    <View style={styles.rankInfo}>
+                                                        <Text
+                                                            style={[
+                                                                styles.rankTitle,
+                                                                { color: palette.text },
+                                                            ]}
+                                                            numberOfLines={1}
+                                                        >
+                                                            {track.title}
+                                                        </Text>
+                                                        <Text
+                                                            style={[
+                                                                styles.rankSub,
+                                                                { color: palette.muted },
+                                                            ]}
+                                                            numberOfLines={1}
+                                                        >
+                                                            {track.artist}
+                                                        </Text>
+                                                    </View>
+                                                    <View
+                                                        style={[
+                                                            styles.playPill,
+                                                            { backgroundColor: palette.pillBg },
+                                                        ]}
+                                                    >
+                                                        <Text
+                                                            style={[
+                                                                styles.playPillText,
+                                                                { color: palette.pillText },
+                                                            ]}
+                                                        >
+                                                            {playsLabel}
+                                                        </Text>
+                                                    </View>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </>
                             )}
 
                             {/* Top 5 artistas favoritos */}
                             {stats.topArtists.length > 0 && (
                                 <>
                                     <View style={styles.sectionHeaderRow}>
-                                        <Text style={styles.sectionTitle}>
+                                        <Text
+                                            style={[styles.sectionTitle, { color: palette.text }]}
+                                        >
                                             {t('stats.topArtistsTitle')}
                                         </Text>
                                     </View>
-                                    <View style={styles.listCard}>
+                                    <View
+                                        style={[
+                                            styles.listCard,
+                                            {
+                                                backgroundColor: palette.cardBg,
+                                                borderColor: palette.cardBorder,
+                                            },
+                                        ]}
+                                    >
                                         {stats.topArtists.map((item, idx) => {
                                             const pct = Math.max(
                                                 12,
@@ -503,27 +631,50 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                                                     key={item.artist}
                                                     style={[
                                                         styles.artistRow,
-                                                        idx > 0 && styles.rankRowBorder,
+                                                        idx > 0 && [
+                                                            styles.rankRowBorder,
+                                                            { borderTopColor: palette.divider },
+                                                        ],
                                                     ]}
                                                 >
                                                     <View style={styles.artistTopLine}>
                                                         <Text
-                                                            style={styles.artistName}
+                                                            style={[
+                                                                styles.artistName,
+                                                                { color: palette.text },
+                                                            ]}
                                                             numberOfLines={1}
                                                         >
                                                             {idx + 1}. {item.artist}
                                                         </Text>
-                                                        <Text style={styles.artistPlays}>
+                                                        <Text
+                                                            style={[
+                                                                styles.artistPlays,
+                                                                { color: palette.muted },
+                                                            ]}
+                                                        >
                                                             {t('stats.playsCount', {
                                                                 count: item.totalPlays,
                                                             })}
                                                         </Text>
                                                     </View>
-                                                    <View style={styles.barTrack}>
+                                                    <View
+                                                        style={[
+                                                            styles.barTrack,
+                                                            {
+                                                                backgroundColor:
+                                                                    palette.subtleSurface,
+                                                            },
+                                                        ]}
+                                                    >
                                                         <View
                                                             style={[
                                                                 styles.barFill,
-                                                                { width: `${pct}%` },
+                                                                {
+                                                                    width: `${pct}%`,
+                                                                    backgroundColor:
+                                                                        palette.accent,
+                                                                },
                                                             ]}
                                                         />
                                                     </View>
@@ -552,12 +703,20 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                     showsVerticalScrollIndicator={false}
                 >
                     {/* Banner de próxima alarma */}
-                    <View style={styles.nextAlarmBanner}>
-                        <View style={styles.heroIconWrap}>
-                            <AlarmClock size={20} color="#60A5FA" />
+                    <View
+                        style={[
+                            styles.nextAlarmBanner,
+                            {
+                                backgroundColor: palette.cardBg,
+                                borderColor: palette.cardBorder,
+                            },
+                        ]}
+                    >
+                        <View style={[styles.heroIconWrap, { backgroundColor: palette.accentSoft }]}>
+                            <AlarmClock size={20} color={palette.accent} />
                         </View>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.nextAlarmTitle}>
+                            <Text style={[styles.nextAlarmTitle, { color: palette.text }]}>
                                 {nextAlarm
                                     ? t('alarm.nextAlarm', {
                                           time: formatAlarmTime(nextAlarm.hour, nextAlarm.minute),
@@ -565,7 +724,10 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                                     : t('alarm.noActiveAlarms')}
                             </Text>
                             {nextAlarm ? (
-                                <Text style={styles.nextAlarmSub} numberOfLines={1}>
+                                <Text
+                                    style={[styles.nextAlarmSub, { color: palette.muted }]}
+                                    numberOfLines={1}
+                                >
                                     {(nextAlarm.label.trim() || t('alarm.defaultLabel')) +
                                         ' · ' +
                                         summarizeDays(nextAlarm.days)}
@@ -586,10 +748,22 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
 
                     {/* Lista de alarmas musicales */}
                     {alarms.length === 0 ? (
-                        <View style={styles.emptyCard}>
-                            <AlarmClock size={34} color="#60A5FA" />
-                            <Text style={styles.emptyAlarmTitle}>{t('alarm.emptyTitle')}</Text>
-                            <Text style={styles.emptyCardText}>{t('alarm.emptySub')}</Text>
+                        <View
+                            style={[
+                                styles.emptyCard,
+                                {
+                                    backgroundColor: palette.cardBg,
+                                    borderColor: palette.cardBorder,
+                                },
+                            ]}
+                        >
+                            <AlarmClock size={34} color={palette.accent} />
+                            <Text style={[styles.emptyAlarmTitle, { color: palette.text }]}>
+                                {t('alarm.emptyTitle')}
+                            </Text>
+                            <Text style={[styles.emptyCardText, { color: palette.muted }]}>
+                                {t('alarm.emptySub')}
+                            </Text>
                         </View>
                     ) : (
                         alarms.map((alarm) => (
@@ -597,6 +771,10 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                                 key={alarm.id}
                                 style={[
                                     styles.alarmCard,
+                                    {
+                                        backgroundColor: palette.cardBg,
+                                        borderColor: palette.cardBorder,
+                                    },
                                     !alarm.enabled && styles.alarmCardDisabled,
                                 ]}
                                 activeOpacity={0.85}
@@ -607,12 +785,16 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                                         <Text
                                             style={[
                                                 styles.alarmTime,
-                                                !alarm.enabled && styles.alarmTextMuted,
+                                                { color: palette.text },
+                                                !alarm.enabled && { color: palette.muted },
                                             ]}
                                         >
                                             {formatAlarmTime(alarm.hour, alarm.minute)}
                                         </Text>
-                                        <Text style={styles.alarmLabel} numberOfLines={1}>
+                                        <Text
+                                            style={[styles.alarmLabel, { color: palette.muted }]}
+                                            numberOfLines={1}
+                                        >
                                             {alarm.label.trim() || t('alarm.defaultLabel')} ·{' '}
                                             {summarizeDays(alarm.days)}
                                         </Text>
@@ -620,19 +802,30 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
                                     <Switch
                                         value={alarm.enabled}
                                         onValueChange={(val) => handleToggleAlarm(alarm.id, val)}
-                                        trackColor={{ false: '#27272A', true: '#2563EB' }}
+                                        trackColor={{ false: '#71717A', true: '#2563EB' }}
                                         thumbColor="#FFFFFF"
                                     />
                                 </View>
 
                                 <View style={styles.alarmFooterRow}>
-                                    <View style={styles.alarmTrackBadge}>
+                                    <View
+                                        style={[
+                                            styles.alarmTrackBadge,
+                                            { backgroundColor: palette.pillBg },
+                                        ]}
+                                    >
                                         {alarm.trackId ? (
-                                            <Music size={13} color="#60A5FA" />
+                                            <Music size={13} color={palette.accent} />
                                         ) : (
-                                            <Shuffle size={13} color="#60A5FA" />
+                                            <Shuffle size={13} color={palette.accent} />
                                         )}
-                                        <Text style={styles.alarmTrackText} numberOfLines={1}>
+                                        <Text
+                                            style={[
+                                                styles.alarmTrackText,
+                                                { color: palette.pillText },
+                                            ]}
+                                            numberOfLines={1}
+                                        >
                                             {alarm.trackTitle || t('alarm.randomSong')}
                                         </Text>
                                     </View>

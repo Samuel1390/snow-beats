@@ -48,16 +48,14 @@ export const ThemePreviewMockup: React.FC<ThemePreviewMockupProps> = React.memo(
                         isBrightLightPreset && brightness >= 75
                             ? 'rgba(255,255,255,0.20)'
                             : `rgba(0,0,0,${Math.max(0.20, darkOverlay)})`;
-                    const bgImageKey = `${darkMode ? 'dark' : 'light'}-${previewTheme.customImage.presetId ?? previewTheme.customImage.uri ?? 'custom'}`;
-
                     return (
                         <View style={[styles.fill, { backgroundColor: darkMode ? '#0A0A0A' : '#181C24' }]}>
                             <Image
-                                key={bgImageKey}
                                 source={source}
-                                blurRadius={blur > 0 ? blur : undefined}
+                                blurRadius={blur > 0 ? blur : 0}
+                                fadeDuration={0}
                                 onLoadEnd={onImageLoaded}
-                                style={StyleSheet.absoluteFill}
+                                style={styles.bgImage}
                                 resizeMode="cover"
                             />
                             <View
@@ -204,7 +202,12 @@ const styles = StyleSheet.create({
     fill: {
         flex: 1,
     },
-    fillImage: {
+    bgImage: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         width: '100%',
         height: '100%',
     },

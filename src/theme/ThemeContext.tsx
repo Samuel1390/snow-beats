@@ -151,15 +151,13 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
             const baseScrim = isBrightLightPreset && brightness >= 75
                 ? 'rgba(255, 255, 255, 0.20)'
                 : `rgba(0, 0, 0, ${Math.max(0.20, darkOverlayOpacity)})`;
-            const bgImageKey = `${darkMode ? 'dark' : 'light'}-${theme.customImage.presetId ?? theme.customImage.uri ?? 'custom'}`;
-
             return (
                 <View style={[styles.fill, { backgroundColor: darkMode ? '#0A0A0A' : '#181C24' }]}>
                     <Image
-                        key={bgImageKey}
                         source={source}
-                        blurRadius={blur > 0 ? blur : undefined}
-                        style={StyleSheet.absoluteFill}
+                        blurRadius={blur > 0 ? blur : 0}
+                        fadeDuration={0}
+                        style={styles.bgImage}
                         resizeMode="cover"
                     />
                     <View
@@ -185,4 +183,13 @@ export const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({ chil
 
 const styles = StyleSheet.create({
     fill: { flex: 1 },
+    bgImage: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: '100%',
+    },
 });

@@ -488,13 +488,21 @@ export interface TopArtistStat {
   artworkUri: string | null;
 }
 
+export interface ListeningBucket {
+  ts: number;
+  seconds: number;
+}
+
 export interface ListeningStats {
   totalSeconds: number;
   todaySeconds: number;
   totalPlays: number;
+  otherPlays: number;
   totalTracks: number;
   favoritesCount: number;
   withLyricsCount: number;
+  installedAt: number;
+  buckets: ListeningBucket[];
   topTracks: Track[];
   topArtists: TopArtistStat[];
 }
@@ -518,6 +526,9 @@ interface StoredListeningTime {
   todaySeconds: number;
 }
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const BUCKET_SIZE_MS = 60 * 1000;
+
 function getLocalDateKey(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -540,22 +551,75 @@ function parseStoredListeningTime(raw: string | null): StoredListeningTime {
   }
 }
 
+function parseStoredBuckets(raw: string | undefined): ListeningBucket[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((b) => b && Number.isFinite(Number(b.ts)) && Number.isFinite(Number(b.seconds)))
+      .map((b) => ({ ts: Number(b.ts), seconds: Math.max(0, Number(b.seconds)) }))
+      .sort((a, b) => a.ts - b.ts);
+  } catch {
+    return [];
+  }
+}
+
 export async function addListeningSeconds(seconds: number): Promise<void> {
   const delta = Math.floor(seconds);
   if (delta <= 0) return;
-  const current = parseStoredListeningTime(await getAppSetting('listening_stats'));
+  const state = loadState();
+  const current = parseStoredListeningTime(state.appSettings['listening_stats'] ?? null);
   const next: StoredListeningTime = {
     totalSeconds: current.totalSeconds + delta,
     todayDate: getLocalDateKey(),
     todaySeconds: current.todaySeconds + delta,
   };
-  await setAppSetting('listening_stats', JSON.stringify(next));
+  state.appSettings['listening_stats'] = JSON.stringify(next);
+
+  const now = Date.now();
+  if (!state.appSettings['app_installed_at']) {
+    state.appSettings['app_installed_at'] = String(now);
+  }
+  const bucketTs = Math.floor(now / BUCKET_SIZE_MS) * BUCKET_SIZE_MS;
+  const cutoff = now - THIRTY_DAYS_MS;
+  const buckets = parseStoredBuckets(state.appSettings['listening_buckets']).filter(
+    (b) => b.ts >= cutoff
+  );
+  const existing = buckets.find((b) => b.ts === bucketTs);
+  if (existing) {
+    existing.seconds += delta;
+  } else {
+    buckets.push({ ts: bucketTs, seconds: delta });
+    buckets.sort((a, b) => a.ts - b.ts);
+  }
+  state.appSettings['listening_buckets'] = JSON.stringify(buckets);
+  saveState(state);
 }
 
 export async function getListeningStats(): Promise<ListeningStats> {
   const state = loadState();
-  const timeData = parseStoredListeningTime(await getAppSetting('listening_stats'));
+  const timeData = parseStoredListeningTime(state.appSettings['listening_stats'] ?? null);
   const visible = state.tracks.filter((t) => !t.isDeleted && !t.isHidden);
+
+  const now = Date.now();
+  let installedAt = Number(state.appSettings['app_installed_at']);
+  if (!Number.isFinite(installedAt) || installedAt <= 0 || installedAt > now) {
+    installedAt = now;
+    state.appSettings['app_installed_at'] = String(installedAt);
+    saveState(state);
+  }
+
+  const cutoff = now - THIRTY_DAYS_MS;
+  const buckets = parseStoredBuckets(state.appSettings['listening_buckets']).filter(
+    (b) => b.ts >= cutoff
+  );
+  if (buckets.length === 0 && timeData.totalSeconds > 0) {
+    buckets.push({
+      ts: Math.max(installedAt, now - BUCKET_SIZE_MS),
+      seconds: timeData.totalSeconds,
+    });
+  }
 
   const totalPlays = visible.reduce((acc, t) => acc + (t.playCount || 0), 0);
   const favoritesCount = visible.filter((t) => t.isFavorite).length;
@@ -565,6 +629,9 @@ export async function getListeningStats(): Promise<ListeningStats> {
     .filter((t) => t.playCount > 0)
     .sort((a, b) => b.playCount - a.playCount || (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
     .slice(0, 5);
+
+  const top5Plays = topTracks.reduce((acc, t) => acc + (t.playCount || 0), 0);
+  const otherPlays = Math.max(0, totalPlays - top5Plays);
 
   const artistMap = new Map<string, TopArtistStat>();
   for (const t of visible) {
@@ -589,9 +656,12 @@ export async function getListeningStats(): Promise<ListeningStats> {
     totalSeconds: timeData.totalSeconds,
     todaySeconds: timeData.todaySeconds,
     totalPlays,
+    otherPlays,
     totalTracks: visible.length,
     favoritesCount,
     withLyricsCount,
+    installedAt,
+    buckets,
     topTracks,
     topArtists,
   };
@@ -605,6 +675,7 @@ export async function resetListeningStats(): Promise<void> {
     todaySeconds: 0,
   };
   state.appSettings['listening_stats'] = JSON.stringify(empty);
+  state.appSettings['listening_buckets'] = JSON.stringify([]);
   state.tracks = state.tracks.map((t) => ({ ...t, playCount: 0, lastPlayedAt: 0 }));
   saveState(state);
 }
