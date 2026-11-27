@@ -8,7 +8,12 @@ import React, {
     useState,
 } from 'react';
 import { Platform } from 'react-native';
-import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
+import {
+    createAudioPlayer,
+    setAudioModeAsync,
+    setIsAudioActiveAsync,
+    AudioPlayer,
+} from 'expo-audio';
 import {
     addMediaActionListener,
     dismissMediaNotification,
@@ -77,20 +82,77 @@ export const usePlayerProgress = () => useContext(PlayerProgressContext);
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
+interface SnowBeatsAudioSingleton {
+    activePlayer: AudioPlayer | null;
+    allPlayers: Set<AudioPlayer>;
+    currentTrack: Track | null;
+    queue: Track[];
+    currentIndex: number;
+}
+
+const GLOBAL_AUDIO_KEY = '__snowBeatsAudioEngineSingleton';
+
+function getAudioSingleton(): SnowBeatsAudioSingleton {
+    const g = globalThis as unknown as Record<string, SnowBeatsAudioSingleton | undefined>;
+    if (!g[GLOBAL_AUDIO_KEY]) {
+        g[GLOBAL_AUDIO_KEY] = {
+            activePlayer: null,
+            allPlayers: new Set<AudioPlayer>(),
+            currentTrack: null,
+            queue: [],
+            currentIndex: -1,
+        };
+    }
+    return g[GLOBAL_AUDIO_KEY]!;
+}
+
+function destroyAllTrackedPlayers(): void {
+    const singleton = getAudioSingleton();
+    const toDestroy = new Set<AudioPlayer>(singleton.allPlayers);
+    if (singleton.activePlayer) {
+        toDestroy.add(singleton.activePlayer);
+    }
+    toDestroy.forEach((p) => {
+        try {
+            p.pause();
+        } catch { }
+        try {
+            p.volume = 0;
+        } catch { }
+        try {
+            p.remove();
+        } catch { }
+    });
+    singleton.allPlayers.clear();
+    singleton.activePlayer = null;
+}
+
+// Fuerza a expo-audio en Android a pausar CUALQUIER reproductor huérfano que sobrevivió al cierre de la pestaña
+async function silenceAllNativeAudioPlayers(): Promise<void> {
+    destroyAllTrackedPlayers();
+    try {
+        await setIsAudioActiveAsync(false);
+    } catch { }
+    try {
+        await setIsAudioActiveAsync(true);
+    } catch { }
+}
+
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const playerRef = useRef<AudioPlayer | null>(null);
+    const singleton = getAudioSingleton();
+    const playerRef = useRef<AudioPlayer | null>(singleton.activePlayer);
     const playRequestIdRef = useRef<number>(0); // Cancela cargas viejas si el usuario spamea
     const hasEndedRef = useRef<boolean>(false); // Evita disparar playNext() dos veces al terminar
 
-    const queueRef = useRef<Track[]>([]);
-    const currentIndexRef = useRef<number>(-1);
-    const currentTrackRef = useRef<Track | null>(null);
+    const queueRef = useRef<Track[]>(singleton.queue);
+    const currentIndexRef = useRef<number>(singleton.currentIndex);
+    const currentTrackRef = useRef<Track | null>(singleton.currentTrack);
     const repeatModeRef = useRef<RepeatMode>('repeat_all');
     const playbackRateRef = useRef<number>(1);
     const pitchRef = useRef<number>(1);
 
-    const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
-    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTrack, setCurrentTrack] = useState<Track | null>(singleton.currentTrack);
+    const [isPlaying, setIsPlaying] = useState(Boolean(singleton.activePlayer?.playing));
     const [position, setPosition] = useState(0);
     const [duration, setDuration] = useState(0);
     const [repeatMode, setRepeatMode] = useState<RepeatMode>('repeat_all');
@@ -169,12 +231,36 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         []
     );
 
-    // Configura audio en segundo plano y carga alarmas guardadas al iniciar
+    // Configura audio en segundo plano, limpia cualquier instancia huérfana tras cerrar la pestaña y carga alarmas
     useEffect(() => {
         setAudioModeAsync({
             playsInSilentMode: true,
             shouldPlayInBackground: true,
+            interruptionMode: 'doNotMix',
         }).catch(() => { });
+
+        const audioSingleton = getAudioSingleton();
+        if (audioSingleton.activePlayer && audioSingleton.currentTrack && audioSingleton.activePlayer.playing) {
+            // Re-engancha la UI si el runtime JS sobrevivió con una canción sonando
+            playerRef.current = audioSingleton.activePlayer;
+            currentTrackRef.current = audioSingleton.currentTrack;
+            queueRef.current = audioSingleton.queue;
+            currentIndexRef.current = audioSingleton.currentIndex;
+            setCurrentTrack(audioSingleton.currentTrack);
+            setIsPlaying(true);
+            setPosition(audioSingleton.activePlayer.currentTime ?? 0);
+            setDuration(audioSingleton.activePlayer.duration || audioSingleton.currentTrack.duration || 0);
+        } else {
+            // Arranque limpio (ej. después de deslizar/borrar la pestaña de Recientes):
+            // mata cualquier ExoPlayer huérfano que haya quedado sonando en el módulo nativo
+            playerRef.current = null;
+            currentTrackRef.current = null;
+            audioSingleton.currentTrack = null;
+            silenceAllNativeAudioPlayers().catch(() => { });
+            if (Platform.OS === 'android') {
+                dismissMediaNotification().catch(() => { });
+            }
+        }
 
         getMusicAlarms()
             .then((list) => {
@@ -186,7 +272,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => {
             flushListeningTime();
             stopFadeInTimer();
-            playerRef.current?.remove();
+            destroyAllTrackedPlayers();
+            playerRef.current = null;
+            getAudioSingleton().currentTrack = null;
+            setIsAudioActiveAsync(false).catch(() => { });
             if (Platform.OS === 'android') {
                 dismissMediaNotification().catch(() => { });
             }
@@ -214,33 +303,44 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const requestId = ++playRequestIdRef.current;
         hasEndedRef.current = false;
 
-        // Detiene y destruye SIEMPRE la instancia anterior antes de crear la nueva
-        if (playerRef.current) {
-            try {
-                playerRef.current.pause();
-                playerRef.current.remove();
-            } catch { }
-            playerRef.current = null;
+        // 1. Detiene y destruye SIEMPRE todas las instancias previas (rastreadas y huérfanas nativas)
+        playerRef.current = null;
+        await silenceAllNativeAudioPlayers();
+
+        // Si mientras se silenciaba el audio nativo entró otro clic, cancela esta solicitud vieja
+        if (requestId !== playRequestIdRef.current) {
+            return;
         }
 
+        const audioSingleton = getAudioSingleton();
         if (newQueue) {
             queueRef.current = newQueue;
             currentIndexRef.current = newQueue.findIndex((t) => t.id === track.id);
+            audioSingleton.queue = newQueue;
+            audioSingleton.currentIndex = currentIndexRef.current;
         }
 
         const player = createAudioPlayer({ uri: track.uri });
+        audioSingleton.allPlayers.add(player);
+
         try {
             player.shouldCorrectPitch = pitchRef.current === 1;
             player.setPlaybackRate(playbackRateRef.current);
         } catch { }
 
-        // Si mientras se creaba entró otro clic, descartamos este reproductor
+        // Si mientras se creaba entró otro clic, descartamos este reproductor de inmediato
         if (requestId !== playRequestIdRef.current) {
-            player.pause();
-            player.remove();
+            try {
+                player.pause();
+                player.volume = 0;
+                player.remove();
+            } catch { }
+            audioSingleton.allPlayers.delete(player);
             return;
         }
 
+        audioSingleton.activePlayer = player;
+        audioSingleton.currentTrack = track;
         playerRef.current = player;
         player.play();
 
@@ -457,10 +557,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     }
                     break;
                 case 'close':
-                    if (playerRef.current) {
-                        playerRef.current.pause();
-                        setIsPlaying(false);
-                    }
+                    playRequestIdRef.current += 1;
+                    playerRef.current = null;
+                    currentTrackRef.current = null;
+                    getAudioSingleton().currentTrack = null;
+                    setIsPlaying(false);
+                    silenceAllNativeAudioPlayers().catch(() => { });
                     dismissMediaNotification().catch(() => { });
                     break;
             }

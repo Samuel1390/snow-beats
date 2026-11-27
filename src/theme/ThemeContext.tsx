@@ -95,6 +95,8 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const systemScheme = useColorScheme();
     const [theme, setTheme] = useState<ThemeConfig>(DEFAULT_THEME_CONFIG);
+    const persistTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingPersistRef = React.useRef<ThemeConfig | null>(null);
 
     useEffect(() => {
         getAppSetting('theme_config').then((raw) => {
@@ -104,12 +106,32 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 } catch { }
             }
         });
+        return () => {
+            if (persistTimerRef.current) {
+                clearTimeout(persistTimerRef.current);
+                persistTimerRef.current = null;
+            }
+            if (pendingPersistRef.current) {
+                setAppSetting('theme_config', JSON.stringify(pendingPersistRef.current));
+                pendingPersistRef.current = null;
+            }
+        };
     }, []);
 
     const updateTheme = useCallback((partial: Partial<ThemeConfig>) => {
         setTheme((prev) => {
             const next = { ...prev, ...partial };
-            setAppSetting('theme_config', JSON.stringify(next));
+            pendingPersistRef.current = next;
+            if (persistTimerRef.current) {
+                clearTimeout(persistTimerRef.current);
+            }
+            persistTimerRef.current = setTimeout(() => {
+                persistTimerRef.current = null;
+                if (pendingPersistRef.current) {
+                    setAppSetting('theme_config', JSON.stringify(pendingPersistRef.current));
+                    pendingPersistRef.current = null;
+                }
+            }, 220);
             return next;
         });
     }, []);

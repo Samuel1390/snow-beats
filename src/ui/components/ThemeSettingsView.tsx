@@ -51,56 +51,105 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
     const [pickerMode, setPickerMode] = useState<'solid' | 'gradient' | null>(null);
     // Estado temporal para previsualizar y ajustar brillo/blur de una imagen ANTES de aplicarla
     const [pendingImage, setPendingImage] = useState<CustomImageBackground | null>(null);
-    // Bloqueo anti-spam + loader fallback mientras cambia la imagen de fondo
-    const [loadingImageKey, setLoadingImageKey] = useState<string | null>(null);
-    const loaderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Bloqueo anti-spam unificado + feedback visual al cambiar modo, color, gradiente o imagen
+    const [applyingKey, setApplyingKey] = useState<string | null>(null);
+    const [showApplyingBanner, setShowApplyingBanner] = useState(false);
+    const applyingLockRef = useRef(false);
+    const waitForImageRef = useRef(false);
+    const applyStartMsRef = useRef(0);
+    const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const rafRef = useRef<number | null>(null);
 
-    const clearImageLoader = useCallback(() => {
-        if (loaderTimerRef.current) {
-            clearTimeout(loaderTimerRef.current);
-            loaderTimerRef.current = null;
+    const clearAllApplyTimers = useCallback(() => {
+        if (releaseTimerRef.current) {
+            clearTimeout(releaseTimerRef.current);
+            releaseTimerRef.current = null;
         }
-        setLoadingImageKey(null);
+        if (bannerTimerRef.current) {
+            clearTimeout(bannerTimerRef.current);
+            bannerTimerRef.current = null;
+        }
+        if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
     }, []);
+
+    const finishThemeApply = useCallback(() => {
+        clearAllApplyTimers();
+        applyingLockRef.current = false;
+        waitForImageRef.current = false;
+        setApplyingKey(null);
+        setShowApplyingBanner(false);
+    }, [clearAllApplyTimers]);
+
+    const handlePreviewImageLoaded = useCallback(() => {
+        if (!applyingLockRef.current || !waitForImageRef.current) return;
+        const elapsed = Date.now() - applyStartMsRef.current;
+        const remaining = Math.max(0, 140 - elapsed);
+        if (releaseTimerRef.current) {
+            clearTimeout(releaseTimerRef.current);
+        }
+        if (remaining === 0) {
+            finishThemeApply();
+        } else {
+            releaseTimerRef.current = setTimeout(finishThemeApply, remaining);
+        }
+    }, [finishThemeApply]);
 
     useEffect(() => {
         return () => {
-            if (loaderTimerRef.current) {
-                clearTimeout(loaderTimerRef.current);
-            }
+            clearAllApplyTimers();
         };
-    }, []);
+    }, [clearAllApplyTimers]);
 
-    // Precarga en caché las imágenes predeterminadas del modo activo para acelerar el cambio
+    // Precarga en caché las variantes oscura y clara de los fondos predeterminados
     useEffect(() => {
         THEME_IMAGE_PRESETS.forEach((preset) => {
-            const src = isDarkMode ? preset.dark : preset.light;
-            try {
-                const resolved = Image.resolveAssetSource(src);
-                if (resolved?.uri && /^https?:\/\//i.test(resolved.uri)) {
-                    Image.prefetch(resolved.uri).catch(() => { });
-                }
-            } catch { }
+            [preset.dark, preset.light].forEach((src) => {
+                try {
+                    const resolved = Image.resolveAssetSource(src);
+                    if (resolved?.uri && /^https?:\/\//i.test(resolved.uri)) {
+                        Image.prefetch(resolved.uri).catch(() => { });
+                    }
+                } catch { }
+            });
         });
-    }, [isDarkMode]);
+    }, []);
 
-    // Selección instantánea de imagen sin bloqueos ni remounts innecesarios
-    const handleSelectImageTheme = useCallback(
-        (key: string, patch: Partial<ThemeConfig>, isRemoteOrCustom = false) => {
-            if (isRemoteOrCustom) {
-                setLoadingImageKey(key);
-                if (loaderTimerRef.current) clearTimeout(loaderTimerRef.current);
-                loaderTimerRef.current = setTimeout(() => {
-                    loaderTimerRef.current = null;
-                    setLoadingImageKey(null);
-                }, 260);
-            } else {
-                clearImageLoader();
-            }
-            updateTheme(patch);
+    // Aplica cualquier cambio de tema con bloqueo anti-spam y feedback de carga fluido
+    const applyThemeChange = useCallback(
+        (key: string, patch: Partial<ThemeConfig>, waitForImage = false) => {
+            if (applyingLockRef.current) return;
+            clearAllApplyTimers();
+            applyingLockRef.current = true;
+            waitForImageRef.current = waitForImage;
+            applyStartMsRef.current = Date.now();
+            setApplyingKey(key);
+            setShowApplyingBanner(false);
+
+            // Muestra el indicador superior solo si la transición tarda más de 85ms (evita parpadeos)
+            bannerTimerRef.current = setTimeout(() => {
+                if (applyingLockRef.current) {
+                    setShowApplyingBanner(true);
+                }
+            }, 85);
+
+            // Fallback garantizado para liberar el bloqueo sin quedarse nunca colgado
+            const maxLockMs = waitForImage ? 460 : 170;
+            releaseTimerRef.current = setTimeout(finishThemeApply, maxLockMs);
+
+            // Pinta primero el spinner en el elemento tocado y aplica el tema en el siguiente frame
+            rafRef.current = requestAnimationFrame(() => {
+                rafRef.current = null;
+                updateTheme(patch);
+            });
         },
-        [clearImageLoader, updateTheme]
+        [clearAllApplyTimers, finishThemeApply, updateTheme]
     );
+
+    const isApplying = applyingKey !== null;
 
     const customSolids = theme.customSolidColors ?? [];
     const customGradients = theme.customGradients ?? [];
@@ -191,28 +240,38 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
         [customGradients, updateTheme]
     );
 
-    // Al cambiar entre Oscuro / Claro / Sistema, conserva imágenes y gradientes y solo alterna sólido en modo sólido
+    // Al cambiar entre Oscuro / Claro / Sistema, conserva imágenes y gradientes con bloqueo anti-spam
     const handleModeChange = useCallback(
         (nextMode: ThemeConfig['mode']) => {
+            if (theme.mode === nextMode || applyingLockRef.current) return;
+            const modeKey = `mode:${nextMode}`;
             if (theme.backgroundType === 'image' && theme.customImage) {
-                updateTheme({
-                    mode: nextMode,
-                    customImage: { ...theme.customImage },
-                });
+                applyThemeChange(
+                    modeKey,
+                    {
+                        mode: nextMode,
+                        customImage: { ...theme.customImage },
+                    },
+                    true
+                );
                 return;
             }
             if (theme.backgroundType === 'gradient') {
-                updateTheme({ mode: nextMode });
+                applyThemeChange(modeKey, { mode: nextMode }, false);
                 return;
             }
             const nextDark = resolveIsDarkMode(nextMode, systemScheme);
-            updateTheme({
-                mode: nextMode,
-                backgroundType: 'solid',
-                solidColor: nextDark ? '#0A0A0A' : '#FFFFFF',
-            });
+            applyThemeChange(
+                modeKey,
+                {
+                    mode: nextMode,
+                    backgroundType: 'solid',
+                    solidColor: nextDark ? '#0A0A0A' : '#FFFFFF',
+                },
+                false
+            );
         },
-        [theme.backgroundType, theme.customImage, systemScheme, updateTheme]
+        [theme.mode, theme.backgroundType, theme.customImage, systemScheme, applyThemeChange]
     );
 
     const pendingPreviewTheme: ThemeConfig | null = pendingImage
@@ -237,26 +296,39 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
-                {/* Carrusel de vista previa en vivo (estilo Lark Player) */}
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.previewCarousel}
-                >
-                    <ThemePreviewMockup
-                        previewTheme={theme}
-                        variant="songs"
-                        width={210}
-                        height={310}
-                        onImageLoaded={clearImageLoader}
-                    />
-                    <ThemePreviewMockup
-                        previewTheme={theme}
-                        variant="player"
-                        width={210}
-                        height={310}
-                    />
-                </ScrollView>
+                {/* Carrusel de vista previa en vivo (estilo Lark Player) + pill sutil de carga */}
+                <View style={styles.previewWrap}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.previewCarousel}
+                    >
+                        <ThemePreviewMockup
+                            previewTheme={theme}
+                            variant="songs"
+                            width={210}
+                            height={310}
+                            onImageLoaded={handlePreviewImageLoaded}
+                        />
+                        <ThemePreviewMockup
+                            previewTheme={theme}
+                            variant="player"
+                            width={210}
+                            height={310}
+                        />
+                    </ScrollView>
+
+                    {showApplyingBanner && (
+                        <View pointerEvents="none" style={styles.applyingBannerWrap}>
+                            <View style={styles.applyingBannerPill}>
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                                <Text style={styles.applyingBannerText}>
+                                    {t('theme.applying')}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+                </View>
 
                 {/* Selector segmentado Oscuro / Claro / Sistema */}
                 <View style={styles.modeSegmented}>
@@ -268,17 +340,27 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         ] as const
                     ).map(({ key, label, Icon }) => {
                         const active = theme.mode === key;
+                        const isLoadingMode = applyingKey === `mode:${key}`;
                         return (
                             <TouchableOpacity
                                 key={key}
-                                style={[styles.modeSegmentBtn, active && styles.modeSegmentBtnActive]}
+                                disabled={isApplying}
+                                style={[
+                                    styles.modeSegmentBtn,
+                                    active && styles.modeSegmentBtnActive,
+                                    isApplying && !isLoadingMode && styles.controlDimmed,
+                                ]}
                                 onPress={() => handleModeChange(key)}
                             >
-                                <Icon size={15} color={active ? '#FFFFFF' : '#A1A1AA'} />
+                                {isLoadingMode ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <Icon size={15} color={active ? '#FFFFFF' : '#A1A1AA'} />
+                                )}
                                 <Text
                                     style={[
                                         styles.modeSegmentText,
-                                        active && styles.modeSegmentTextActive,
+                                        (active || isLoadingMode) && styles.modeSegmentTextActive,
                                     ]}
                                 >
                                     {label}
@@ -297,7 +379,8 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         contentContainerStyle={styles.swatchRow}
                     >
                         <TouchableOpacity
-                            style={styles.customTriggerCircle}
+                            style={[styles.customTriggerCircle, isApplying && styles.controlDimmed]}
+                            disabled={isApplying}
                             activeOpacity={0.8}
                             onPress={() => setPickerMode('solid')}
                         >
@@ -305,23 +388,36 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         </TouchableOpacity>
 
                         {customSolids.map((hex) => {
+                            const itemKey = `solid:custom:${hex.toUpperCase()}`;
                             const isSelected =
                                 theme.backgroundType === 'solid' &&
                                 theme.solidColor.toUpperCase() === hex.toUpperCase();
+                            const isLoadingThis = applyingKey === itemKey;
                             const checkInk = getRelativeLuminance(hex) > 0.45 ? '#111114' : '#FFFFFF';
                             return (
                                 <TouchableOpacity
                                     key={`custom-solid-${hex}`}
+                                    disabled={isApplying}
                                     style={[
                                         styles.swatchCircle,
                                         { backgroundColor: hex },
                                         isSelected && styles.swatchSelected,
+                                        isApplying && !isLoadingThis && styles.controlDimmed,
                                     ]}
-                                    onPress={() =>
-                                        updateTheme({ backgroundType: 'solid', solidColor: hex })
-                                    }
+                                    onPress={() => {
+                                        if (isSelected) return;
+                                        applyThemeChange(
+                                            itemKey,
+                                            { backgroundType: 'solid', solidColor: hex },
+                                            false
+                                        );
+                                    }}
                                 >
-                                    {isSelected && <Check size={18} color={checkInk} />}
+                                    {isLoadingThis ? (
+                                        <ActivityIndicator size="small" color={checkInk} />
+                                    ) : isSelected ? (
+                                        <Check size={18} color={checkInk} />
+                                    ) : null}
                                 </TouchableOpacity>
                             );
                         })}
@@ -331,23 +427,36 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
 
                         {SOLID_PALETTES.map((p) => {
                             const color = isDarkMode ? p.darkBg : p.lightBg;
+                            const itemKey = `solid:preset:${p.name}:${color.toUpperCase()}`;
                             const isSelected =
                                 theme.backgroundType === 'solid' &&
                                 theme.solidColor.toUpperCase() === color.toUpperCase();
+                            const isLoadingThis = applyingKey === itemKey;
                             const checkInk = getRelativeLuminance(color) > 0.45 ? '#111114' : '#FFFFFF';
                             return (
                                 <TouchableOpacity
                                     key={p.name}
+                                    disabled={isApplying}
                                     style={[
                                         styles.swatchCircle,
                                         { backgroundColor: color },
                                         isSelected && styles.swatchSelected,
+                                        isApplying && !isLoadingThis && styles.controlDimmed,
                                     ]}
-                                    onPress={() =>
-                                        updateTheme({ backgroundType: 'solid', solidColor: color })
-                                    }
+                                    onPress={() => {
+                                        if (isSelected) return;
+                                        applyThemeChange(
+                                            itemKey,
+                                            { backgroundType: 'solid', solidColor: color },
+                                            false
+                                        );
+                                    }}
                                 >
-                                    {isSelected && <Check size={18} color={checkInk} />}
+                                    {isLoadingThis ? (
+                                        <ActivityIndicator size="small" color={checkInk} />
+                                    ) : isSelected ? (
+                                        <Check size={18} color={checkInk} />
+                                    ) : null}
                                 </TouchableOpacity>
                             );
                         })}
@@ -363,7 +472,8 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         contentContainerStyle={styles.swatchRow}
                     >
                         <TouchableOpacity
-                            style={styles.customTriggerCircle}
+                            style={[styles.customTriggerCircle, isApplying && styles.controlDimmed]}
+                            disabled={isApplying}
                             activeOpacity={0.8}
                             onPress={() => setPickerMode('gradient')}
                         >
@@ -371,26 +481,39 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         </TouchableOpacity>
 
                         {customGradients.map((pair, idx) => {
+                            const itemKey = `gradient:custom:${pair[0]}-${pair[1]}`;
                             const isSelected =
                                 theme.backgroundType === 'gradient' &&
                                 theme.gradientColors[0].toUpperCase() === pair[0].toUpperCase() &&
                                 theme.gradientColors[1].toUpperCase() === pair[1].toUpperCase();
+                            const isLoadingThis = applyingKey === itemKey;
                             return (
                                 <TouchableOpacity
                                     key={`custom-grad-${idx}-${pair[0]}-${pair[1]}`}
+                                    disabled={isApplying}
                                     style={[
                                         styles.gradientCircleWrap,
                                         isSelected && styles.swatchSelected,
+                                        isApplying && !isLoadingThis && styles.controlDimmed,
                                     ]}
-                                    onPress={() =>
-                                        updateTheme({
-                                            backgroundType: 'gradient',
-                                            gradientColors: pair,
-                                        })
-                                    }
+                                    onPress={() => {
+                                        if (isSelected) return;
+                                        applyThemeChange(
+                                            itemKey,
+                                            {
+                                                backgroundType: 'gradient',
+                                                gradientColors: pair,
+                                            },
+                                            false
+                                        );
+                                    }}
                                 >
                                     <LinearGradient colors={pair} style={styles.gradientCircleFill}>
-                                        {isSelected && <Check size={18} color="#FFFFFF" />}
+                                        {isLoadingThis ? (
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                        ) : isSelected ? (
+                                            <Check size={18} color="#FFFFFF" />
+                                        ) : null}
                                     </LinearGradient>
                                 </TouchableOpacity>
                             );
@@ -400,26 +523,39 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         <View style={styles.verticalDivider} />
 
                         {GRADIENT_PRESETS.map((g) => {
+                            const itemKey = `gradient:preset:${g.name}`;
                             const isSelected =
                                 theme.backgroundType === 'gradient' &&
                                 theme.gradientColors[0].toUpperCase() === g.colors[0].toUpperCase() &&
                                 theme.gradientColors[1].toUpperCase() === g.colors[1].toUpperCase();
+                            const isLoadingThis = applyingKey === itemKey;
                             return (
                                 <TouchableOpacity
                                     key={g.name}
+                                    disabled={isApplying}
                                     style={[
                                         styles.gradientCircleWrap,
                                         isSelected && styles.swatchSelected,
+                                        isApplying && !isLoadingThis && styles.controlDimmed,
                                     ]}
-                                    onPress={() =>
-                                        updateTheme({
-                                            backgroundType: 'gradient',
-                                            gradientColors: g.colors,
-                                        })
-                                    }
+                                    onPress={() => {
+                                        if (isSelected) return;
+                                        applyThemeChange(
+                                            itemKey,
+                                            {
+                                                backgroundType: 'gradient',
+                                                gradientColors: g.colors,
+                                            },
+                                            false
+                                        );
+                                    }}
                                 >
                                     <LinearGradient colors={g.colors} style={styles.gradientCircleFill}>
-                                        {isSelected && <Check size={18} color="#FFFFFF" />}
+                                        {isLoadingThis ? (
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                        ) : isSelected ? (
+                                            <Check size={18} color="#FFFFFF" />
+                                        ) : null}
                                     </LinearGradient>
                                 </TouchableOpacity>
                             );
@@ -436,7 +572,8 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                         contentContainerStyle={styles.imageStripRow}
                     >
                         <TouchableOpacity
-                            style={styles.addImageRect}
+                            style={[styles.addImageRect, isApplying && styles.controlDimmed]}
+                            disabled={isApplying}
                             activeOpacity={0.8}
                             onPress={handlePickNewImage}
                         >
@@ -450,18 +587,20 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                 theme.backgroundType === 'image' &&
                                 Boolean(img.uri) &&
                                 theme.customImage?.uri === img.uri;
-                            const isLoadingThis = loadingImageKey === itemKey;
+                            const isLoadingThis = applyingKey === itemKey;
                             return (
                                 <View key={img.uri} style={styles.savedImgWrap}>
                                     <TouchableOpacity
                                         activeOpacity={0.85}
+                                        disabled={isApplying}
                                         style={[
                                             styles.savedImageRect,
                                             isSelected && styles.savedImageRectSelected,
+                                            isApplying && !isLoadingThis && styles.controlDimmed,
                                         ]}
                                         onPress={() => {
                                             if (isSelected) return;
-                                            handleSelectImageTheme(
+                                            applyThemeChange(
                                                 itemKey,
                                                 {
                                                     backgroundType: 'image',
@@ -502,6 +641,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         )}
                                         <TouchableOpacity
                                             style={styles.imgEditBadge}
+                                            disabled={isApplying}
                                             onPress={() => setPendingImage(img)}
                                         >
                                             <Pencil size={12} color="#FFFFFF" />
@@ -521,18 +661,21 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                             const isSelected =
                                 theme.backgroundType === 'image' &&
                                 theme.customImage?.presetId === preset.id;
+                            const isLoadingThis = applyingKey === itemKey;
                             const source = isDarkMode ? preset.dark : preset.light;
                             return (
                                 <View key={preset.id} style={styles.savedImgWrap}>
                                     <TouchableOpacity
                                         activeOpacity={0.85}
+                                        disabled={isApplying}
                                         style={[
                                             styles.savedImageRect,
                                             isSelected && styles.savedImageRectSelected,
+                                            isApplying && !isLoadingThis && styles.controlDimmed,
                                         ]}
                                         onPress={() => {
                                             if (isSelected) return;
-                                            handleSelectImageTheme(
+                                            applyThemeChange(
                                                 itemKey,
                                                 {
                                                     backgroundType: 'image',
@@ -542,7 +685,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                                         brightness: 100,
                                                     },
                                                 },
-                                                false
+                                                true
                                             );
                                         }}
                                     >
@@ -552,7 +695,12 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                             style={styles.savedImageFill}
                                             resizeMode="cover"
                                         />
-                                        {isSelected && (
+                                        {isLoadingThis && (
+                                            <View style={styles.imgLoaderOverlay}>
+                                                <ActivityIndicator size="small" color="#FFFFFF" />
+                                            </View>
+                                        )}
+                                        {isSelected && !isLoadingThis && (
                                             <View style={styles.imgCheckBadge}>
                                                 <Check size={14} color="#FFFFFF" />
                                             </View>
@@ -560,6 +708,7 @@ export const ThemeSettingsView: React.FC<ThemeSettingsViewProps> = React.memo(({
                                         {/* Permite ajustar brillo y blur incluso sobre un fondo predeterminado */}
                                         <TouchableOpacity
                                             style={styles.imgEditBadge}
+                                            disabled={isApplying}
                                             onPress={() =>
                                                 setPendingImage({
                                                     presetId: preset.id,
@@ -724,11 +873,41 @@ const styles = StyleSheet.create({
     scrollContent: {
         paddingBottom: 38,
     },
+    previewWrap: {
+        position: 'relative',
+    },
     previewCarousel: {
         paddingHorizontal: 18,
         paddingTop: 16,
         paddingBottom: 12,
         gap: 14,
+    },
+    applyingBannerWrap: {
+        position: 'absolute',
+        top: 24,
+        left: 0,
+        right: 0,
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    applyingBannerPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: 'rgba(12, 14, 20, 0.86)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.18)',
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 999,
+    },
+    applyingBannerText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    controlDimmed: {
+        opacity: 0.62,
     },
     modeSegmented: {
         flexDirection: 'row',

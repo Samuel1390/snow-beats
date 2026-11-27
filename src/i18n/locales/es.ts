@@ -245,6 +245,7 @@ export const es = {
     'theme.preview.fiveSongs': '5 canciones',
     'theme.preview.play': 'Reproducir',
     'theme.preview.shuffle': 'Aleatorio',
+    'theme.applying': 'Aplicando tema...',
 
     // Selector de color
     'colorPicker.customGradient': 'Gradiente personalizado',

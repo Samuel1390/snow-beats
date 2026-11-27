@@ -365,6 +365,14 @@ class SnowMediaNotificationService : Service() {
     stopSelf()
   }
 
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    // Al cerrar/deslizar la app desde Recientes ("borrar pestaña"),
+    // detenemos inmediatamente la reproducción y cerramos la notificación/servicio.
+    dispatchAction("close")
+    dismissSelf()
+    super.onTaskRemoved(rootIntent)
+  }
+
   override fun onDestroy() {
     try {
       mediaSession?.isActive = false

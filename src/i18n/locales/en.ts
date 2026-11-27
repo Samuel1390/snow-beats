@@ -247,6 +247,7 @@ export const en: TranslationDictionary = {
     'theme.preview.fiveSongs': '5 songs',
     'theme.preview.play': 'Play',
     'theme.preview.shuffle': 'Shuffle',
+    'theme.applying': 'Applying theme...',
 
     // Color picker
     'colorPicker.customGradient': 'Custom gradient',
