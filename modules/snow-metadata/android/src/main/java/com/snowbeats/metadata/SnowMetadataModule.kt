@@ -137,18 +137,9 @@ class SnowMetadataModule : Module() {
           }
           artworkUri = "file://${outFile.absolutePath}"
 
-          // Escala a 1x1 para obtener el color promedio rápido sin bloquear memoria
           val rawBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
           if (rawBmp != null) {
-            val tiny = Bitmap.createScaledBitmap(rawBmp, 1, 1, true)
-            val pixel = tiny.getPixel(0, 0)
-            dominantHex = String.format(
-              "#%02X%02X%02X",
-              Color.red(pixel),
-              Color.green(pixel),
-              Color.blue(pixel)
-            )
-            tiny.recycle()
+            dominantHex = extractDominantColorHex(rawBmp)
             rawBmp.recycle()
           }
         }
@@ -1325,15 +1316,7 @@ class SnowMetadataModule : Module() {
         finalBmp.compress(Bitmap.CompressFormat.JPEG, 92, fos)
       }
 
-      val tiny = Bitmap.createScaledBitmap(finalBmp, 1, 1, true)
-      val pixel = tiny.getPixel(0, 0)
-      tiny.recycle()
-      val dominantHex = String.format(
-        "#%02X%02X%02X",
-        Color.red(pixel),
-        Color.green(pixel),
-        Color.blue(pixel)
-      )
+      val dominantHex = extractDominantColorHex(finalBmp)
 
       mapOf(
         "artworkUri" to "file://${outFile.absolutePath}",
@@ -1345,6 +1328,83 @@ class SnowMetadataModule : Module() {
       if (finalBmp != null && finalBmp !== squareBmp && finalBmp !== rawBmp) finalBmp.recycle()
       if (squareBmp != null && squareBmp !== rawBmp) squareBmp.recycle()
       rawBmp?.recycle()
+    }
+  }
+
+  // Extrae el color dominante más representativo de la carátula (24x24 HSV por buckets de matiz)
+  // evitando que fondos negros/blancos laven el color a gris; si la portada es monocromática usa el promedio real.
+  private fun extractDominantColorHex(source: Bitmap): String {
+    val sampleSize = 24
+    val scaled = Bitmap.createScaledBitmap(source, sampleSize, sampleSize, true)
+    try {
+      val buckets = 18
+      val weights = FloatArray(buckets)
+      val sumR = FloatArray(buckets)
+      val sumG = FloatArray(buckets)
+      val sumB = FloatArray(buckets)
+      val hsv = FloatArray(3)
+
+      var totalR = 0L
+      var totalG = 0L
+      var totalB = 0L
+      var totalCount = 0
+
+      for (y in 0 until sampleSize) {
+        for (x in 0 until sampleSize) {
+          val pixel = scaled.getPixel(x, y)
+          val r = Color.red(pixel)
+          val g = Color.green(pixel)
+          val b = Color.blue(pixel)
+          totalR += r
+          totalG += g
+          totalB += b
+          totalCount++
+
+          Color.RGBToHSV(r, g, b, hsv)
+          val hue = hsv[0]
+          val sat = hsv[1]
+          val valLum = hsv[2]
+
+          // Ignora píxeles casi negros, casi blancos o casi grises al votar por matiz vibrante
+          if (sat >= 0.18f && valLum >= 0.14f && valLum <= 0.95f) {
+            val idx = ((hue / 360f) * buckets).toInt().coerceIn(0, buckets - 1)
+            val lumWeight = 1f - kotlin.math.abs(valLum - 0.55f)
+            val w = sat * sat * (0.4f + 0.6f * lumWeight.coerceAtLeast(0.1f))
+            weights[idx] += w
+            sumR[idx] += r * w
+            sumG[idx] += g * w
+            sumB[idx] += b * w
+          }
+        }
+      }
+
+      var bestIdx = -1
+      var bestWeight = 0f
+      for (i in 0 until buckets) {
+        if (weights[i] > bestWeight) {
+          bestWeight = weights[i]
+          bestIdx = i
+        }
+      }
+
+      if (bestIdx >= 0 && bestWeight >= 1.2f) {
+        val avgR = (sumR[bestIdx] / bestWeight).toInt().coerceIn(0, 255)
+        val avgG = (sumG[bestIdx] / bestWeight).toInt().coerceIn(0, 255)
+        val avgB = (sumB[bestIdx] / bestWeight).toInt().coerceIn(0, 255)
+        return String.format("#%02X%02X%02X", avgR, avgG, avgB)
+      }
+
+      val c = totalCount.coerceAtLeast(1)
+      return String.format(
+        "#%02X%02X%02X",
+        (totalR / c).toInt().coerceIn(0, 255),
+        (totalG / c).toInt().coerceIn(0, 255),
+        (totalB / c).toInt().coerceIn(0, 255)
+      )
+    } finally {
+      if (scaled !== source) {
+        scaled.recycle()
+      }
     }
   }
 

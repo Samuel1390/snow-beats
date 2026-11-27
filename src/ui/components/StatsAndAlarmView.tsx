@@ -39,7 +39,9 @@ import {
     ListeningStats,
     MusicAlarm,
     resetListeningStats,
+    updateTrackMetadata,
 } from '../../storage/database/db';
+import { readTrackTags } from '../../../modules/snow-metadata';
 import { Track } from '../../types/music';
 import { usePlayer } from '../../audio-engine/PlayerContext';
 import { useI18n } from '../../i18n/LanguageContext';
@@ -137,6 +139,50 @@ export const StatsAndAlarmView: React.FC<StatsAndAlarmViewProps> = ({
         try {
             const data = await getListeningStats();
             setStats(data);
+
+            // Completa en segundo plano el color dominante de las top 5 si alguna canción tiene carátula sin color guardado
+            const needsColor = data.topTracks.filter(
+                (tr) => !tr.dominantColor && Boolean(tr.uri)
+            );
+            if (needsColor.length > 0) {
+                Promise.all(
+                    needsColor.map(async (tr) => {
+                        try {
+                            const tags = await readTrackTags(tr.uri, tr.id);
+                            if (!tags?.dominantColor) return null;
+                            const nextArtwork = tr.artworkUri ?? tags.artworkUri ?? null;
+                            if (!nextArtwork) return null;
+                            const updated: Track = {
+                                ...tr,
+                                artworkUri: nextArtwork,
+                                dominantColor: tags.dominantColor,
+                            };
+                            await updateTrackMetadata(tr.id, {
+                                artworkUri: updated.artworkUri,
+                                dominantColor: updated.dominantColor,
+                            });
+                            return updated;
+                        } catch {
+                            return null;
+                        }
+                    })
+                )
+                    .then((enriched) => {
+                        const patchMap = new Map(
+                            enriched.filter((item): item is Track => Boolean(item)).map((item) => [item.id, item])
+                        );
+                        if (patchMap.size === 0) return;
+                        setStats((prev) =>
+                            prev
+                                ? {
+                                      ...prev,
+                                      topTracks: prev.topTracks.map((tr) => patchMap.get(tr.id) ?? tr),
+                                  }
+                                : prev
+                        );
+                    })
+                    .catch(() => { });
+            }
         } finally {
             setLoadingStats(false);
         }

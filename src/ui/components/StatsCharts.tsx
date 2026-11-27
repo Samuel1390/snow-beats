@@ -25,7 +25,7 @@ import { Flame, Music } from 'lucide-react-native';
 import { ListeningBucket } from '../../storage/database/db';
 import { Track } from '../../types/music';
 import { resolveIsLightText, useTheme } from '../../theme/ThemeContext';
-import { getContrastRatio } from '../../theme/colorContrast';
+import { getDonutSliceColor } from '../../theme/colorContrast';
 import { useI18n } from '../../i18n/LanguageContext';
 
 export interface StatsThemePalette {
@@ -42,6 +42,7 @@ export interface StatsThemePalette {
     chartGrid: string;
     chartAxisText: string;
     otherSliceColor: string;
+    noCoverSliceColor: string;
     pillBg: string;
     pillText: string;
     divider: string;
@@ -69,6 +70,7 @@ export function useStatsPalette(): StatsThemePalette {
                 chartGrid: 'rgba(255,255,255,0.09)',
                 chartAxisText: '#94A3B8',
                 otherSliceColor: '#71717A',
+                noCoverSliceColor: '#52525B',
                 pillBg: 'rgba(37, 99, 235, 0.22)',
                 pillText: '#93C5FD',
                 divider: 'rgba(255,255,255,0.07)',
@@ -89,6 +91,7 @@ export function useStatsPalette(): StatsThemePalette {
             chartGrid: 'rgba(15, 23, 42, 0.10)',
             chartAxisText: '#475569',
             otherSliceColor: '#94A3B8',
+            noCoverSliceColor: '#CBD5E1',
             pillBg: 'rgba(29, 78, 216, 0.12)',
             pillText: '#1E40AF',
             divider: 'rgba(15, 23, 42, 0.08)',
@@ -591,58 +594,6 @@ export const ListeningTimelineChart: React.FC<ListeningTimelineChartProps> = Rea
 // 2. GRÁFICO DE DONA: TOP 5 CON COLOR DOMINANTE DE CARÁTULA + 6ª PORCIÓN "OTRAS" EN GRIS
 // ============================================================================
 
-const FALLBACK_DONUT_COLORS = ['#38BDF8', '#A78BFA', '#34D399', '#F59E0B', '#F472B6'];
-
-function hexToRgb(hex: string): [number, number, number] {
-    const clean = hex.replace('#', '');
-    return [
-        parseInt(clean.substring(0, 2), 16),
-        parseInt(clean.substring(2, 4), 16),
-        parseInt(clean.substring(4, 6), 16),
-    ];
-}
-
-function rgbToHex(r: number, g: number, b: number): string {
-    const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
-    return `#${[clamp(r), clamp(g), clamp(b)]
-        .map((v) => v.toString(16).padStart(2, '0'))
-        .join('')}`;
-}
-
-function adjustColorForSurfaceContrast(
-    rawHex: string | null | undefined,
-    fallbackIndex: number,
-    surfaceBgHex: string,
-    isDarkSurface: boolean
-): string {
-    if (!rawHex || !/^#[0-9A-Fa-f]{6}$/.test(rawHex)) {
-        return FALLBACK_DONUT_COLORS[fallbackIndex % FALLBACK_DONUT_COLORS.length];
-    }
-
-    // Mantiene el color dominante real de la carátula y solo ajusta levemente brillo si se pierde contra el tema
-    if (getContrastRatio(rawHex, surfaceBgHex) >= 2.15) {
-        return rawHex;
-    }
-
-    let [r, g, b] = hexToRgb(rawHex);
-    for (let step = 0; step < 8; step++) {
-        if (isDarkSurface) {
-            r = r + (255 - r) * 0.22;
-            g = g + (255 - g) * 0.22;
-            b = b + (255 - b) * 0.22;
-        } else {
-            r = r * 0.78;
-            g = g * 0.78;
-            b = b * 0.78;
-        }
-        const candidate = rgbToHex(r, g, b);
-        if (getContrastRatio(candidate, surfaceBgHex) >= 2.35) {
-            return candidate;
-        }
-    }
-    return rgbToHex(r, g, b);
-}
-
 function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
     const rad = ((angleDeg - 90) * Math.PI) / 180;
     return {
@@ -704,16 +655,17 @@ export const TopSongsDonutChart: React.FC<TopSongsDonutChartProps> = React.memo(
                     : top5.reduce((acc, tr) => acc + (tr.playCount || 0), 0) + otherPlays
             );
 
-            const items: DonutSliceItem[] = top5.map((track, idx) => ({
+            const items: DonutSliceItem[] = top5.map((track) => ({
                 id: track.id,
                 label: track.title,
                 plays: track.playCount || 0,
                 percent: Math.round(((track.playCount || 0) / sumPlays) * 100),
-                color: adjustColorForSurfaceContrast(
+                color: getDonutSliceColor(
                     track.dominantColor,
-                    idx,
+                    Boolean(track.artworkUri),
                     palette.cardBgHex,
-                    palette.isDarkSurface
+                    palette.isDarkSurface,
+                    palette.noCoverSliceColor
                 ),
             }));
 

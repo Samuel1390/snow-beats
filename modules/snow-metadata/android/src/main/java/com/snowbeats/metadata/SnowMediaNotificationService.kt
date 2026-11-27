@@ -161,14 +161,18 @@ class SnowMediaNotificationService : Service() {
       ACTION_NEXT -> dispatchAction("next")
       ACTION_FAVORITE -> dispatchAction("favorite")
       ACTION_CLOSE -> {
+        currentIsPlaying = false
         dispatchAction("close")
         dismissSelf()
       }
 
-      ACTION_DISMISS -> dismissSelf()
+      ACTION_DISMISS -> {
+        currentIsPlaying = false
+        dismissSelf()
+      }
     }
 
-    return START_NOT_STICKY
+    return if (currentIsPlaying) START_STICKY else START_NOT_STICKY
   }
 
   private fun updateSessionMetadataAndState() {
@@ -366,10 +370,9 @@ class SnowMediaNotificationService : Service() {
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
-    // Al cerrar/deslizar la app desde Recientes ("borrar pestaña"),
-    // detenemos inmediatamente la reproducción y cerramos la notificación/servicio.
-    dispatchAction("close")
-    dismissSelf()
+    // No detenemos el servicio ni la música al quitar la ventana de Recientes o si el sistema cierra la actividad:
+    // la reproducción y la notificación deben continuar hasta que el usuario cierre explícitamente desde la notificación
+    // o elija otra canción al volver a abrir Snow Beats.
     super.onTaskRemoved(rootIntent)
   }
 

@@ -156,7 +156,6 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
         const playScale = useRef(new Animated.Value(1)).current;
         const isClosingRef = useRef(false);
         const isSlidingRef = useRef(false);
-        const prevVisibleRef = useRef(false);
         const isOverlayOpenRef = useRef(false);
         const editTrackBackRef = useRef<(() => boolean) | null>(null);
 
@@ -187,18 +186,29 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
             };
         }, [visible, currentTrack?.id]);
 
-        // Slide-in fluido de abajo hacia arriba (solo se dispara al transicionar visible false -> true)
-        useEffect(() => {
-            const wasVisible = prevVisibleRef.current;
-            prevVisibleRef.current = visible;
-            let rafId: number | null = null;
+        const shouldShow = visible && Boolean(currentTrack);
+        const mountedRef = useRef(mounted);
+        mountedRef.current = mounted;
 
-            if (visible && !wasVisible && currentTrack) {
+        // Si el track desaparece (ej. cerrar desde notificación) mientras visible estaba true, sincroniza el cierre
+        useEffect(() => {
+            if (visible && !currentTrack) {
+                setMounted(false);
+                isClosingRef.current = false;
+                onClose();
+            }
+        }, [visible, currentTrack, onClose]);
+
+        // Slide-in / slide-out fiable: depende únicamente de shouldShow (booleano) para que setMounted(true) nunca cancele el requestAnimationFrame
+        useEffect(() => {
+            if (shouldShow) {
+                openAnim.stopAnimation();
+                dragY.stopAnimation();
                 isClosingRef.current = false;
                 dragY.setValue(0);
                 openAnim.setValue(0);
                 setMounted(true);
-                rafId = requestAnimationFrame(() => {
+                const rafId = requestAnimationFrame(() => {
                     Animated.timing(openAnim, {
                         toValue: 1,
                         duration: 280,
@@ -206,7 +216,8 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                         useNativeDriver: true,
                     }).start();
                 });
-            } else if (!visible && wasVisible && !isClosingRef.current) {
+                return () => cancelAnimationFrame(rafId);
+            } else if (mountedRef.current && !isClosingRef.current) {
                 Animated.timing(openAnim, {
                     toValue: 0,
                     duration: 220,
@@ -216,11 +227,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = React.memo(
                     if (finished) setMounted(false);
                 });
             }
-
-            return () => {
-                if (rafId !== null) cancelAnimationFrame(rafId);
-            };
-        }, [visible, currentTrack, openAnim, dragY]);
+        }, [shouldShow, openAnim, dragY]);
 
         // Cierre inverso (slide-out de arriba hacia abajo devolviendo carátula, título y artista)
         const animateClose = useCallback(() => {

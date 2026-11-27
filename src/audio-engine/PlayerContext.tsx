@@ -127,14 +127,18 @@ function destroyAllTrackedPlayers(): void {
     singleton.activePlayer = null;
 }
 
-// Fuerza a expo-audio en Android a pausar CUALQUIER reproductor huérfano que sobrevivió al cierre de la pestaña
+// Fuerza a expo-audio en Android a pausar CUALQUIER reproductor previo (incluso huérfano tras borrar la ventana)
+// Solo se llama al seleccionar una canción nueva o al pulsar Cerrar (X) en la notificación
 async function silenceAllNativeAudioPlayers(): Promise<void> {
     destroyAllTrackedPlayers();
+    const withTimeout = (p: Promise<unknown>, ms = 350) =>
+        Promise.race([p, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
     try {
-        await setIsAudioActiveAsync(false);
+        await withTimeout(setIsAudioActiveAsync(false));
     } catch { }
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
     try {
-        await setIsAudioActiveAsync(true);
+        await withTimeout(setIsAudioActiveAsync(true));
     } catch { }
 }
 
@@ -231,7 +235,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         []
     );
 
-    // Configura audio en segundo plano, limpia cualquier instancia huérfana tras cerrar la pestaña y carga alarmas
+    // Configura audio en segundo plano, re-hidrata si había una pista viva y carga alarmas.
+    // IMPORTANTE: Nunca detiene la música ni cierra la notificación al desmontar/cerrar ventana;
+    // la canción en segundo plano sigue sonando hasta que el usuario elija otra canción o pulse Cerrar en la notificación.
     useEffect(() => {
         setAudioModeAsync({
             playsInSilentMode: true,
@@ -240,26 +246,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }).catch(() => { });
 
         const audioSingleton = getAudioSingleton();
-        if (audioSingleton.activePlayer && audioSingleton.currentTrack && audioSingleton.activePlayer.playing) {
-            // Re-engancha la UI si el runtime JS sobrevivió con una canción sonando
+        if (audioSingleton.activePlayer && audioSingleton.currentTrack) {
+            // Re-engancha la UI si el runtime JS sobrevivió con una canción sonando o pausada
             playerRef.current = audioSingleton.activePlayer;
             currentTrackRef.current = audioSingleton.currentTrack;
             queueRef.current = audioSingleton.queue;
             currentIndexRef.current = audioSingleton.currentIndex;
             setCurrentTrack(audioSingleton.currentTrack);
-            setIsPlaying(true);
+            setIsPlaying(Boolean(audioSingleton.activePlayer.playing));
             setPosition(audioSingleton.activePlayer.currentTime ?? 0);
             setDuration(audioSingleton.activePlayer.duration || audioSingleton.currentTrack.duration || 0);
-        } else {
-            // Arranque limpio (ej. después de deslizar/borrar la pestaña de Recientes):
-            // mata cualquier ExoPlayer huérfano que haya quedado sonando en el módulo nativo
-            playerRef.current = null;
-            currentTrackRef.current = null;
-            audioSingleton.currentTrack = null;
-            silenceAllNativeAudioPlayers().catch(() => { });
-            if (Platform.OS === 'android') {
-                dismissMediaNotification().catch(() => { });
-            }
         }
 
         getMusicAlarms()
@@ -272,13 +268,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => {
             flushListeningTime();
             stopFadeInTimer();
-            destroyAllTrackedPlayers();
-            playerRef.current = null;
-            getAudioSingleton().currentTrack = null;
-            setIsAudioActiveAsync(false).catch(() => { });
-            if (Platform.OS === 'android') {
-                dismissMediaNotification().catch(() => { });
-            }
         };
     }, [flushListeningTime, stopFadeInTimer]);
 
@@ -303,21 +292,29 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const requestId = ++playRequestIdRef.current;
         hasEndedRef.current = false;
 
-        // 1. Detiene y destruye SIEMPRE todas las instancias previas (rastreadas y huérfanas nativas)
-        playerRef.current = null;
-        await silenceAllNativeAudioPlayers();
-
-        // Si mientras se silenciaba el audio nativo entró otro clic, cancela esta solicitud vieja
-        if (requestId !== playRequestIdRef.current) {
-            return;
-        }
-
         const audioSingleton = getAudioSingleton();
         if (newQueue) {
             queueRef.current = newQueue;
             currentIndexRef.current = newQueue.findIndex((t) => t.id === track.id);
             audioSingleton.queue = newQueue;
             audioSingleton.currentIndex = currentIndexRef.current;
+        }
+
+        // Actualiza estado visual de forma síncrona ANTES de cualquier await para que FullPlayerModal abra al instante
+        audioSingleton.currentTrack = track;
+        currentTrackRef.current = track;
+        setCurrentTrack(track);
+        setPosition(0);
+        setDuration(track.duration);
+        setIsPlaying(true);
+
+        // 1. Corta SIEMPRE cualquier canción anterior (rastreada o huérfana tras borrar la ventana) antes de reproducir la nueva
+        playerRef.current = null;
+        await silenceAllNativeAudioPlayers();
+
+        // Si mientras se silenciaba el audio nativo entró otro clic, cancela esta solicitud vieja
+        if (requestId !== playRequestIdRef.current) {
+            return;
         }
 
         const player = createAudioPlayer({ uri: track.uri });
@@ -340,7 +337,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         audioSingleton.activePlayer = player;
-        audioSingleton.currentTrack = track;
         playerRef.current = player;
         player.play();
 
@@ -349,17 +345,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             requestNotificationPermission().catch(() => { });
         }
 
-        currentTrackRef.current = track;
-        setCurrentTrack(track);
-        setPosition(0);
-        setDuration(track.duration);
-        setIsPlaying(true);
         syncNotification(track, true, 0, track.duration);
-
         markTrackPlayed(track.id).catch(() => { });
 
-        // Lee etiquetas ID3 en segundo plano si aún no tiene carátula
-        if (!track.artworkUri) {
+        // Lee etiquetas ID3 y color dominante en segundo plano si aún faltan
+        if (!track.artworkUri || !track.dominantColor) {
             readTrackTags(track.uri, track.id)
                 .then(async (tags) => {
                     if (!tags) return;
@@ -368,12 +358,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         title: tags.title || track.title,
                         artist: tags.artist || track.artist,
                         album: tags.album || track.album,
-                        artworkUri: tags.artworkUri ?? null,
-                        dominantColor: tags.dominantColor ?? null,
+                        artworkUri: track.artworkUri ?? tags.artworkUri ?? null,
+                        dominantColor: track.dominantColor ?? tags.dominantColor ?? null,
                     };
                     await updateTrackMetadata(track.id, updated);
                     if (currentTrackRef.current?.id === track.id) {
                         currentTrackRef.current = updated;
+                        audioSingleton.currentTrack = updated;
                         setCurrentTrack(updated);
                         syncNotification(updated, Boolean(playerRef.current?.playing));
                     }

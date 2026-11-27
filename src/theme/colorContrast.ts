@@ -178,3 +178,51 @@ export function getAdaptiveCardInk(cardBackgroundHex: string): {
               isDarkSurface: false,
           };
 }
+
+// Calcula el color de una porción del gráfico de dona usando el color dominante de la carátula
+// (mismo matiz que SongCard/FullPlayerModal) sin desaturarlo a gris; solo canciones sin carátula quedan grises
+export function getDonutSliceColor(
+    dominantHex: string | null | undefined,
+    hasArtwork: boolean,
+    surfaceBgHex: string,
+    isDarkSurface: boolean,
+    grayColor: string
+): string {
+    if (!hasArtwork) {
+        return grayColor;
+    }
+    if (!dominantHex || !/^#[0-9A-Fa-f]{6}$/.test(dominantHex)) {
+        return grayColor;
+    }
+
+    const [r, g, b] = hexToRgb(dominantHex);
+    const [h, s, l] = rgbToHsl(r, g, b);
+
+    // Si la portada es realmente blanco y negro / monocromática (saturación casi nula), conservar neutralidad legible
+    if (s < 0.04) {
+        const neutralL = isDarkSurface ? Math.max(0.54, Math.min(0.76, l)) : Math.min(0.46, Math.max(0.28, l));
+        const [nr, ng, nb] = hslToRgb(h, s, neutralL);
+        return rgbToHex(nr, ng, nb);
+    }
+
+    // Preserva exactamente el matiz (hue) de la carátula y garantiza saturación viva (nunca lavado a gris)
+    const vividS = Math.max(0.52, Math.min(0.86, s < 0.35 ? s * 1.65 + 0.2 : s * 1.15));
+    let targetL = isDarkSurface
+        ? Math.max(0.48, Math.min(0.68, l < 0.36 ? 0.56 : l))
+        : Math.min(0.50, Math.max(0.32, l > 0.64 ? 0.42 : l));
+
+    // Ajusta únicamente la luminosidad HSL hasta garantizar contraste nítido contra la tarjeta del tema
+    for (let step = 0; step < 8; step++) {
+        const [cr, cg, cb] = hslToRgb(h, vividS, targetL);
+        const candidate = rgbToHex(cr, cg, cb);
+        if (getContrastRatio(candidate, surfaceBgHex) >= 2.8) {
+            return candidate;
+        }
+        targetL = isDarkSurface
+            ? Math.min(0.78, targetL + 0.045)
+            : Math.max(0.22, targetL - 0.045);
+    }
+
+    const [fr, fg, fb] = hslToRgb(h, vividS, targetL);
+    return rgbToHex(fr, fg, fb);
+}
