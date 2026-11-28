@@ -28,7 +28,9 @@ data class WebViewExtractionResult(
   val errorDetail: String? = null
 )
 
-// Extractor nativo de respaldo mediante WebView oculto (offscreen): captura tráfico de red + DOM/OpenGraph
+// Extractor nativo WebView Network Sniffer (layer=webview-sniffer):
+// intercepta tráfico real de video/manifiestos, inyecta sonda ligera DOM/OG,
+// detecta muros de login para abortar rápido y propaga headers + cookies efímeras.
 object SnowHiddenWebViewExtractor {
   private const val TAG = "SnowHiddenWebView"
 
@@ -38,14 +40,15 @@ object SnowHiddenWebViewExtractor {
 
   private val ignoredExtensions = listOf(
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".ico",
-    ".css", ".js", ".mjs", ".woff", ".woff2", ".ttf", ".otf", ".json", ".vtt"
+    ".css", ".js", ".mjs", ".woff", ".woff2", ".ttf", ".otf", ".json", ".vtt", ".srt"
   )
 
   private val ignoredPathKeywords = listOf(
     "doubleclick", "googlesyndication", "google-analytics", "analytics",
     "pixel", "tracking", "telemetry", "storyboard", "sprite", "mosaic",
     "avatar", "profile_pic", "rsrc.php", "static.cdninstagram.com/rsrc",
-    "favicon", "manifest.json", "service-worker", "ads/", "/ad/"
+    "favicon", "manifest.json", "service-worker", "ads/", "/ad/",
+    "ad_break", "sponsored", "thumbnail", "thumb_", "preview_sprite"
   )
 
   private val knownVideoCdnHosts = listOf(
@@ -53,6 +56,7 @@ object SnowHiddenWebViewExtractor {
     "fbcdn.net",
     "tiktokcdn.com",
     "tiktokcdn-us.com",
+    "tiktokcdn-eu.com",
     "tiktokv.com",
     "video.twimg.com",
     "twimg.com"
@@ -65,6 +69,7 @@ object SnowHiddenWebViewExtractor {
     platform: String,
     timeoutMs: Long = 14_000L
   ): WebViewExtractionResult {
+    Log.i(TAG, "[layer=webview-sniffer] Iniciando extracción para platform=$platform url=${pageUrl.take(120)}")
     val mainHandler = Handler(Looper.getMainLooper())
     val latch = CountDownLatch(1)
     val completed = AtomicBoolean(false)
@@ -84,6 +89,12 @@ object SnowHiddenWebViewExtractor {
       }
     }
 
+    fun scheduleTask(delayMs: Long, block: () -> Unit) {
+      val task = Runnable { block() }
+      synchronized(scheduledRunnables) { scheduledRunnables.add(task) }
+      mainHandler.postDelayed(task, delayMs)
+    }
+
     fun recordCandidate(url: String, priority: Int, headers: Map<String, String>) {
       val currentPriority = capturedPriority.get()
       if (capturedStream.get() == null || priority > currentPriority) {
@@ -91,26 +102,26 @@ object SnowHiddenWebViewExtractor {
         capturedPriority.set(priority)
         capturedHeaders.set(headers)
       }
-      // Si ya tenemos un stream de alta confianza y título/miniatura (o prioridad alta), termina pronto
-      if (priority >= 2) {
-        val finishTask = Runnable { finishEarly() }
-        synchronized(scheduledRunnables) { scheduledRunnables.add(finishTask) }
-        mainHandler.postDelayed(finishTask, 750L)
+      // Stream de alta confianza capturado: deja 650ms para que el DOM entregue título/miniatura y termina pronto
+      if (priority >= 3) {
+        scheduleTask(650L) { finishEarly() }
+      } else if (priority >= 2) {
+        scheduleTask(1200L) { finishEarly() }
       }
     }
 
-    // Script defensivo: intenta reproducir <video> silenciado para disparar la red y lee metadatos OpenGraph
+    // Sonda JS ligera: lee <video>, <source>, OpenGraph y detecta muros de login/cuenta privada
     val probeJs = """
       (function() {
         try {
-          var result = { videoUrl: null, title: null, image: null, loginWall: false };
-          var ogVideo = document.querySelector('meta[property="og:video:secure_url"], meta[property="og:video"]');
+          var result = { videoUrl: null, title: null, image: null, loginWall: false, reason: null };
+          var ogVideo = document.querySelector('meta[property="og:video:secure_url"], meta[property="og:video"], meta[name="twitter:player:stream"]');
           if (ogVideo && ogVideo.content && ogVideo.content.indexOf('http') === 0) {
             result.videoUrl = ogVideo.content;
           }
-          var ogTitle = document.querySelector('meta[property="og:title"]');
+          var ogTitle = document.querySelector('meta[property="og:title"], meta[name="twitter:title"]');
           result.title = (ogTitle && ogTitle.content) ? ogTitle.content : (document.title || null);
-          var ogImg = document.querySelector('meta[property="og:image"]');
+          var ogImg = document.querySelector('meta[property="og:image"], meta[name="twitter:image"]');
           if (ogImg && ogImg.content && ogImg.content.indexOf('http') === 0) {
             result.image = ogImg.content;
           }
@@ -134,16 +145,32 @@ object SnowHiddenWebViewExtractor {
             }
           }
           var href = (window.location && window.location.href ? window.location.href : '').toLowerCase();
-          var bodyTxt = (document.body && document.body.innerText ? document.body.innerText.slice(0, 600) : '').toLowerCase();
-          if (
+          var bodyTxt = (document.body && document.body.innerText ? document.body.innerText.slice(0, 1200) : '').toLowerCase();
+          var hasVideoNode = videos.length > 0 || !!result.videoUrl;
+          var isLoginPath =
             href.indexOf('/accounts/login') !== -1 ||
-            href.indexOf('/login') !== -1 ||
+            href.indexOf('/login.php') !== -1 ||
+            href.indexOf('/checkpoint/') !== -1 ||
+            href.indexOf('/challenge/') !== -1 ||
+            href.indexOf('i/flow/login') !== -1;
+          var hasLoginCopy =
             bodyTxt.indexOf('log in to instagram') !== -1 ||
             bodyTxt.indexOf('inicia sesión en instagram') !== -1 ||
+            bodyTxt.indexOf('inicia sesión para continuar') !== -1 ||
+            bodyTxt.indexOf('log in to continue') !== -1 ||
+            bodyTxt.indexOf('log into facebook') !== -1 ||
+            bodyTxt.indexOf('inicia sesión en facebook') !== -1 ||
+            bodyTxt.indexOf('you must log in') !== -1 ||
+            bodyTxt.indexOf('debes iniciar sesión') !== -1 ||
             bodyTxt.indexOf('esta cuenta es privada') !== -1 ||
-            bodyTxt.indexOf('this account is private') !== -1
-          ) {
+            bodyTxt.indexOf('this account is private') !== -1 ||
+            bodyTxt.indexOf("this content isn't available") !== -1 ||
+            bodyTxt.indexOf('este contenido no está disponible') !== -1 ||
+            bodyTxt.indexOf("sorry, this page isn't available") !== -1;
+
+          if (isLoginPath || (!hasVideoNode && hasLoginCopy)) {
             result.loginWall = true;
+            result.reason = isLoginPath ? 'login_redirect' : 'login_wall_text';
           }
           return JSON.stringify(result);
         } catch (err) {
@@ -168,13 +195,23 @@ object SnowHiddenWebViewExtractor {
             if (img.startsWith("http") && capturedThumb.get().isNullOrBlank()) {
               capturedThumb.set(img)
             }
-            if (obj.optBoolean("loginWall", false)) {
-              loginWallDetected.set(true)
-            }
             val domVideo = obj.optString("videoUrl").trim()
             if (domVideo.startsWith("http") && !isIgnoredResource(domVideo)) {
               val headers = buildHeadersWithCookies(domVideo, pageUrl, emptyMap())
+              Log.i(TAG, "[layer=webview-sniffer] Video detectado en DOM ($platform): ${domVideo.take(120)}")
               recordCandidate(domVideo, priority = 3, headers = headers)
+            }
+            if (obj.optBoolean("loginWall", false)) {
+              loginWallDetected.set(true)
+              if (capturedStream.get() == null) {
+                val reason = obj.optString("reason", "login_wall")
+                Log.w(TAG, "[layer=webview-sniffer] Muro de login detectado ($platform, $reason). Abortando rápido.")
+                scheduleTask(250L) {
+                  if (capturedStream.get() == null) {
+                    finishEarly()
+                  }
+                }
+              }
             }
           } catch (_: Exception) { }
         }
@@ -208,11 +245,14 @@ object SnowHiddenWebViewExtractor {
           ): WebResourceResponse? {
             if (completed.get() || request == null) return null
             val reqUrl = request.url?.toString() ?: return null
-            val priority = scoreCandidateMediaUrl(reqUrl, platform)
+            val reqHeaders = request.requestHeaders ?: emptyMap()
+            val priority = scoreCandidateMediaUrl(reqUrl, platform, reqHeaders)
             if (priority > 0) {
-              val reqHeaders = request.requestHeaders ?: emptyMap()
               val mergedHeaders = buildHeadersWithCookies(reqUrl, pageUrl, reqHeaders)
-              Log.i(TAG, "Stream interceptado (p=$priority, platform=$platform): ${reqUrl.take(120)}")
+              Log.i(
+                TAG,
+                "[layer=webview-sniffer] Stream interceptado (p=$priority, platform=$platform): ${reqUrl.take(120)}"
+              )
               recordCandidate(reqUrl, priority, mergedHeaders)
             }
             return null
@@ -220,18 +260,30 @@ object SnowHiddenWebViewExtractor {
 
           override fun onPageFinished(view: WebView?, url: String?) {
             if (view == null || completed.get()) return
-            val probes = listOf(450L, 1800L, 3800L)
-            probes.forEach { delay ->
-              val r = Runnable { runDomProbe(view) }
-              synchronized(scheduledRunnables) { scheduledRunnables.add(r) }
-              mainHandler.postDelayed(r, delay)
+            val lowerFinal = (url ?: "").lowercase(Locale.US)
+            if (
+              capturedStream.get() == null &&
+              (lowerFinal.contains("/accounts/login") ||
+                lowerFinal.contains("/login.php") ||
+                lowerFinal.contains("/checkpoint/"))
+            ) {
+              loginWallDetected.set(true)
+              Log.w(TAG, "[layer=webview-sniffer] Redirección directa a login ($platform): ${lowerFinal.take(100)}")
+              scheduleTask(300L) {
+                if (capturedStream.get() == null) finishEarly()
+              }
+              return
+            }
+
+            listOf(400L, 1600L, 3400L).forEach { delay ->
+              scheduleTask(delay) { runDomProbe(view) }
             }
           }
         }
 
         webView.loadUrl(pageUrl)
       } catch (e: Exception) {
-        Log.e(TAG, "Error iniciando WebView oculto: ${e.message}", e)
+        Log.e(TAG, "[layer=webview-sniffer] Error iniciando WebView oculto: ${e.message}", e)
         finishEarly()
       }
     }
@@ -240,6 +292,10 @@ object SnowHiddenWebViewExtractor {
       latch.await(timeoutMs, TimeUnit.MILLISECONDS)
       val finalStream = capturedStream.get()
       val isLoginLocked = finalStream == null && loginWallDetected.get()
+      Log.i(
+        TAG,
+        "[layer=webview-sniffer] Finalizado platform=$platform foundStream=${finalStream != null} loginWall=$isLoginLocked"
+      )
       WebViewExtractionResult(
         streamUrl = finalStream,
         headers = capturedHeaders.get(),
@@ -298,37 +354,57 @@ object SnowHiddenWebViewExtractor {
     return false
   }
 
-  // Puntúa URLs interceptadas: 0 = ignorar, 1 = candidato parcial/chunk, 2 = stream directo MP4/HLS, 3 = stream óptimo
-  private fun scoreCandidateMediaUrl(url: String, platform: String): Int {
+  // Puntúa URLs interceptadas:
+  // 0 = ignorar (ads/thumbs/estáticos/segmentos corruptos)
+  // 1 = candidato byte-range parcial (último recurso)
+  // 2 = stream MP4/HLS/DASH genérico
+  // 3 = stream óptimo en CDN conocido sin byte-range parcial
+  private fun scoreCandidateMediaUrl(
+    url: String,
+    platform: String,
+    requestHeaders: Map<String, String>
+  ): Int {
     if (isIgnoredResource(url)) return 0
     val lower = url.lowercase(Locale.US)
     val host = try { (Uri.parse(url).host ?: "").lowercase(Locale.US) } catch (_: Exception) { "" }
     val pathOnly = lower.substringBefore('?')
 
+    // Descarta segmentos individuales HLS/DASH (.ts / .m4s / .cmfv / init segments) para capturar el manifiesto o MP4 completo
+    if (pathOnly.endsWith(".ts") || pathOnly.endsWith(".m4s") || pathOnly.endsWith(".cmfv") || pathOnly.endsWith(".cmfa")) {
+      return 0
+    }
+
     val isManifest = pathOnly.endsWith(".m3u8") || lower.contains(".m3u8?") ||
       pathOnly.endsWith(".mpd") || lower.contains(".mpd?")
+    val acceptHeader = (requestHeaders["Accept"] ?: requestHeaders["accept"] ?: "").lowercase(Locale.US)
+    val isVideoAccept = acceptHeader.contains("video/")
     val isMp4 = pathOnly.endsWith(".mp4") || lower.contains(".mp4?") ||
-      lower.contains("mime_type=video_mp4") || lower.contains("mime_type=video")
+      lower.contains("mime_type=video_mp4") || lower.contains("mime_type=video") ||
+      lower.contains("video_mp4")
     val isByteRangeChunk = lower.contains("bytestart=") || lower.contains("byteend=")
 
-    // TikTok suele servir streams sin extensión .mp4 bajo /video/tos/ o /play/
+    // TikTok sirve flujos progresivos bajo /video/tos/ o /aweme/v1/play
     val isTikTokVideo = (platform == "TikTok" || host.contains("tiktok")) &&
       (lower.contains("/video/tos/") || lower.contains("/aweme/v1/play") || lower.contains("mime_type=video"))
 
-    // Instagram / Facebook sirven video MP4 bajo cdninstagram.com o fbcdn.net con efg= o /v/t
+    // Instagram / Facebook sirven video MP4/DASH bajo cdninstagram.com o fbcdn.net
     val isMetaVideo = (host.contains("cdninstagram.com") || host.contains("fbcdn.net")) &&
-      (isMp4 || lower.contains("video_mp4") || lower.contains("/v/t50.") || lower.contains("/v/t2/") || lower.contains("xpv_progressive"))
+      (isMp4 || isManifest || lower.contains("/v/t50.") || lower.contains("/v/t2/") || lower.contains("xpv_progressive"))
 
     // X / Twitter sirve videos en video.twimg.com (.mp4 o .m3u8)
     val isXVideo = host.contains("video.twimg.com") && (isMp4 || isManifest)
 
-    if (isXVideo || (isMetaVideo && !isByteRangeChunk) || isTikTokVideo) {
+    if ((isXVideo || isTikTokVideo || isMetaVideo) && !isByteRangeChunk) {
       return 3
     }
     if ((isMp4 || isManifest) && !isByteRangeChunk) {
       val onKnownCdn = knownVideoCdnHosts.any { host.contains(it) }
       return if (onKnownCdn) 3 else 2
     }
+    if (isVideoAccept && knownVideoCdnHosts.any { host.contains(it) } && !isByteRangeChunk) {
+      return 2
+    }
+    // Fragmento byte-range: solo prioridad 1 (reemplazado en cuanto llegue un MP4/manifiesto íntegro)
     if ((isMp4 || isMetaVideo) && isByteRangeChunk) {
       return 1
     }
@@ -354,15 +430,29 @@ object SnowHiddenWebViewExtractor {
       val cm = CookieManager.getInstance()
       val streamCookie = cm.getCookie(streamUrl)
       val pageCookie = cm.getCookie(pageUrl)
-      val cookieHeader = when {
-        !streamCookie.isNullOrBlank() -> streamCookie
-        !pageCookie.isNullOrBlank() -> pageCookie
-        else -> null
-      }
-      if (!cookieHeader.isNullOrBlank()) {
-        result["Cookie"] = cookieHeader
+      val mergedCookies = mergeCookieStrings(pageCookie, streamCookie)
+      if (!mergedCookies.isNullOrBlank()) {
+        result["Cookie"] = mergedCookies
       }
     } catch (_: Exception) { }
     return result
+  }
+
+  private fun mergeCookieStrings(first: String?, second: String?): String? {
+    val map = LinkedHashMap<String, String>()
+    listOf(first, second).forEach { raw ->
+      if (raw.isNullOrBlank()) return@forEach
+      raw.split(';').forEach { pair ->
+        val trimmed = pair.trim()
+        val eqIdx = trimmed.indexOf('=')
+        if (eqIdx > 0) {
+          val k = trimmed.substring(0, eqIdx).trim()
+          val v = trimmed.substring(eqIdx + 1).trim()
+          if (k.isNotEmpty()) map[k] = v
+        }
+      }
+    }
+    if (map.isEmpty()) return null
+    return map.entries.joinToString("; ") { "${it.key}=${it.value}" }
   }
 }

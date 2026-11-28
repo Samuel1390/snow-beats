@@ -41,8 +41,14 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
         const insets = useSafeAreaInsets();
         const { t } = useI18n();
         const entries = useMemo(() => mediaInfo?.entries ?? [], [mediaInfo?.entries]);
+        const isSpotifyOrAudioOnly =
+            mediaInfo?.platform === 'Spotify' || Boolean(mediaInfo?.isAudioOnly);
         const audioFormats = useMemo(() => mediaInfo?.audioFormats ?? [], [mediaInfo?.audioFormats]);
-        const videoFormats = useMemo(() => mediaInfo?.videoFormats ?? [], [mediaInfo?.videoFormats]);
+        const videoFormats = useMemo(
+            () => (isSpotifyOrAudioOnly ? [] : (mediaInfo?.videoFormats ?? [])),
+            [isSpotifyOrAudioOnly, mediaInfo?.videoFormats]
+        );
+        const hasVideoFormats = videoFormats.length > 0;
 
         const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
         const [formatTab, setFormatTab] = useState<'audio' | 'video'>('audio');
@@ -60,9 +66,10 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
             );
         }, [visible, mediaInfo, entries, audioFormats, videoFormats]);
 
-        const activeFormats = formatTab === 'audio' ? audioFormats : videoFormats;
+        const activeFormats = formatTab === 'audio' || !hasVideoFormats ? audioFormats : videoFormats;
 
         const handleSwitchFormatTab = (tab: 'audio' | 'video') => {
+            if (tab === 'video' && !hasVideoFormats) return;
             setFormatTab(tab);
             const list = tab === 'audio' ? audioFormats : videoFormats;
             if (list.length > 0) setSelectedFormat(list[0]);
@@ -157,26 +164,28 @@ export const PlaylistDownloadModal: React.FC<PlaylistDownloadModalProps> = React
                                     {t('common.audio')}
                                 </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[
-                                    styles.typePill,
-                                    formatTab === 'video' && styles.typePillActive,
-                                ]}
-                                onPress={() => handleSwitchFormatTab('video')}
-                            >
-                                <Film
-                                    size={14}
-                                    color={formatTab === 'video' ? '#FFFFFF' : '#94A3B8'}
-                                />
-                                <Text
+                            {hasVideoFormats && (
+                                <TouchableOpacity
                                     style={[
-                                        styles.typePillText,
-                                        formatTab === 'video' && styles.typePillTextActive,
+                                        styles.typePill,
+                                        formatTab === 'video' && styles.typePillActive,
                                     ]}
+                                    onPress={() => handleSwitchFormatTab('video')}
                                 >
-                                    {t('common.video')}
-                                </Text>
-                            </TouchableOpacity>
+                                    <Film
+                                        size={14}
+                                        color={formatTab === 'video' ? '#FFFFFF' : '#94A3B8'}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.typePillText,
+                                            formatTab === 'video' && styles.typePillTextActive,
+                                        ]}
+                                    >
+                                        {t('common.video')}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         <ScrollView

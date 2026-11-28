@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Image,
     Modal,
@@ -34,13 +34,17 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
     ({ visible, mediaInfo, onClose, onConfirm }) => {
         const insets = useSafeAreaInsets();
         const { t } = useI18n();
-        const audioFormats = mediaInfo?.audioFormats ?? [];
-        const videoFormats = mediaInfo?.videoFormats ?? [];
+        const isSpotify = mediaInfo?.platform === 'Spotify';
+        const isAudioOnly = isSpotify || Boolean(mediaInfo?.isAudioOnly);
+        const audioFormats = useMemo(() => mediaInfo?.audioFormats ?? [], [mediaInfo?.audioFormats]);
+        const videoFormats = useMemo(
+            () => (isAudioOnly ? [] : (mediaInfo?.videoFormats ?? [])),
+            [isAudioOnly, mediaInfo?.videoFormats]
+        );
         const [selected, setSelected] = useState<DownloadFormatOption | null>(null);
 
         useEffect(() => {
             if (!visible || !mediaInfo) return;
-            // Selecciona por defecto MP3 clásico (o el segundo audio) si existe, o el primer formato disponible
             const defaultAudio =
                 audioFormats.find((f) => f.qualityRank >= 128) ?? audioFormats[0] ?? null;
             const defaultVideo = videoFormats[0] ?? null;
@@ -133,6 +137,15 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                             </View>
                         </View>
 
+                        {isSpotify && (
+                            <View style={styles.spotifyNoticeBox}>
+                                <Music size={14} color="#60A5FA" />
+                                <Text style={styles.spotifyNoticeText}>
+                                    {t('downloads.spotifyAudioOnlyHint')}
+                                </Text>
+                            </View>
+                        )}
+
                         <ScrollView
                             style={styles.listScroll}
                             contentContainerStyle={styles.listContent}
@@ -147,7 +160,7 @@ export const DownloadFormatSheet: React.FC<DownloadFormatSheetProps> = React.mem
                                 </View>
                             )}
 
-                            {videoFormats.length > 0 && (
+                            {!isAudioOnly && videoFormats.length > 0 && (
                                 <View style={styles.sectionBlock}>
                                     <Text style={styles.sectionHeading}>
                                         {t('downloads.videoFormatsHeading')}
@@ -244,6 +257,24 @@ const styles = StyleSheet.create({
     mediaDomain: {
         color: '#A1A1AA',
         fontSize: 12.5,
+    },
+    spotifyNoticeBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: 'rgba(30,58,138,0.28)',
+        borderWidth: 1,
+        borderColor: 'rgba(59,130,246,0.32)',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 12,
+    },
+    spotifyNoticeText: {
+        flex: 1,
+        color: '#BFDBFE',
+        fontSize: 12,
+        lineHeight: 16,
     },
     listScroll: {
         maxHeight: 360,

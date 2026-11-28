@@ -58,6 +58,8 @@ interface DownloadQueueItem {
     id: string;
     url: string;
     title: string;
+    artist?: string;
+    album?: string;
     thumbnail?: string | null;
     format: DownloadFormatOption;
     targetPath: string;
@@ -84,7 +86,7 @@ interface DownloadsTabProps {
     onDownloadCompleted: (info: CompletedDownloadInfo) => void;
 }
 
-const SUPPORTED_PLATFORMS = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'X'] as const;
+const SUPPORTED_PLATFORMS = ['YouTube', 'Spotify', 'Instagram', 'TikTok', 'Facebook', 'X'] as const;
 
 // Desenvuelve redirecciones de Google Search (google.com/url?...&url=...) antes de detectar la plataforma
 function unwrapUrlForDetection(raw: string): string {
@@ -109,6 +111,14 @@ function detectPlatformFromUrl(raw: string): string | null {
     const normalized = unwrapUrlForDetection(raw).toLowerCase();
     if (!normalized) return null;
     if (normalized.includes('youtube.com') || normalized.includes('youtu.be')) return 'YouTube';
+    if (
+        normalized.includes('open.spotify.com') ||
+        normalized.includes('spotify.com') ||
+        normalized.includes('spotify.link') ||
+        normalized.includes('spoti.fi')
+    ) {
+        return 'Spotify';
+    }
     if (normalized.includes('instagram.com') || normalized.includes('instagr.am')) return 'Instagram';
     if (normalized.includes('tiktok.com')) return 'TikTok';
     if (
@@ -448,16 +458,47 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                 )
             );
 
+            const resolveLocalizedError = (code?: string, fallbackMsg?: string): string => {
+                if (code === 'LOGIN_WALL' || code === 'LOGIN_REQUIRED') {
+                    return t('downloads.errorLoginWall');
+                }
+                if (code === 'PRIVATE_CONTENT' || code === 'PRIVATE_OR_UNAVAILABLE') {
+                    return t('downloads.errorPrivateContent');
+                }
+                if (code === 'SPOTIFY_NOT_FOUND') {
+                    return t('downloads.errorSpotifyNotFound');
+                }
+                if (code === 'UNSUPPORTED_URL') {
+                    return t('downloads.errorUnsupported');
+                }
+                return fallbackMsg || t('downloads.errorUnexpected');
+            };
+
             try {
+                const audioFmtExt = nextItem.format.ext?.toLowerCase();
+                const normalizedAudioFmt: 'mp3' | 'm4a' | 'opus' | undefined =
+                    nextItem.format.mediaType === 'audio'
+                        ? audioFmtExt === 'm4a' || audioFmtExt === 'opus'
+                            ? audioFmtExt
+                            : 'mp3'
+                        : undefined;
+
                 const res = await downloadMedia({
                     taskId: nextItem.id,
                     url: nextItem.url,
                     formatId: nextItem.format.formatId,
                     mediaType: nextItem.format.mediaType,
                     audioQuality: nextItem.format.audioQuality,
+                    audioFormat: normalizedAudioFmt,
                     targetPath: nextItem.targetPath,
                     headers: nextItem.headers,
                     directStreamUrl: nextItem.directStreamUrl ?? undefined,
+                    metadata: {
+                        title: nextItem.title,
+                        artist: nextItem.artist,
+                        album: nextItem.album,
+                        artworkUrl: nextItem.thumbnail,
+                    },
                 });
 
                 setQueue((prev) =>
@@ -485,8 +526,7 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             ...item,
                             status: 'error',
                             errorCode: res.errorCode || 'UNKNOWN',
-                            errorMessage:
-                                res.errorMessage || t('downloads.errorUnexpected'),
+                            errorMessage: resolveLocalizedError(res.errorCode, res.errorMessage),
                         };
                     })
                 );
@@ -549,9 +589,18 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
             try {
                 const info = await extractMediaInfo(trimmed);
                 if (!info.ok) {
-                    setSearchError(
-                        info.errorMessage || t('downloads.errorExtractFallback')
-                    );
+                    const mappedErr =
+                        info.errorCode === 'LOGIN_WALL' || info.errorCode === 'LOGIN_REQUIRED'
+                            ? t('downloads.errorLoginWall')
+                            : info.errorCode === 'PRIVATE_CONTENT' ||
+                                info.errorCode === 'PRIVATE_OR_UNAVAILABLE'
+                              ? t('downloads.errorPrivateContent')
+                              : info.errorCode === 'SPOTIFY_NOT_FOUND'
+                                ? t('downloads.errorSpotifyNotFound')
+                                : info.errorCode === 'UNSUPPORTED_URL'
+                                  ? t('downloads.errorUnsupported')
+                                  : info.errorMessage || t('downloads.errorExtractFallback');
+                    setSearchError(mappedErr);
                     return;
                 }
                 if (info.isAudioOnly) {
@@ -599,6 +648,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                 items: {
                     url: string;
                     title: string;
+                    artist?: string;
+                    album?: string;
                     thumbnail?: string | null;
                     headers?: Record<string, string>;
                     directStreamUrl?: string | null;
@@ -613,6 +664,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                     id: `dl_${baseTs}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
                     url: entry.url,
                     title: entry.title,
+                    artist: entry.artist,
+                    album: entry.album,
                     thumbnail: entry.thumbnail,
                     headers: entry.headers,
                     directStreamUrl: entry.directStreamUrl,
@@ -637,6 +690,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                             {
                                 url: mediaInfo.url!,
                                 title: mediaInfo.title || t('downloads.downloadedFileFallback'),
+                                artist: mediaInfo.uploader,
+                                album: mediaInfo.album,
                                 thumbnail: mediaInfo.thumbnail,
                                 headers: mediaInfo.previewHeaders,
                                 directStreamUrl: mediaInfo.directStreamUrl,
@@ -658,6 +713,8 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                         entries.map((e) => ({
                             url: e.url,
                             title: e.title,
+                            artist: e.artist,
+                            album: e.album,
                             thumbnail: e.thumbnail,
                         })),
                         format
@@ -914,6 +971,14 @@ export const DownloadsTab: React.FC<DownloadsTabProps> = React.memo(
                                             style={styles.fallbackBannerImg}
                                             resizeMode="cover"
                                         />
+                                    )}
+                                    {mediaInfo.platform === 'Spotify' && (
+                                        <View style={styles.playlistPill}>
+                                            <Music size={12} color="#FFFFFF" />
+                                            <Text style={styles.playlistPillText}>
+                                                {t('downloads.spotifyAudioOnlyBadge')}
+                                            </Text>
+                                        </View>
                                     )}
                                     <Text style={[styles.previewTitle, { color: fgColor }]} numberOfLines={2}>
                                         {mediaInfo.title}

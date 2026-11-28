@@ -59,10 +59,20 @@ export interface PlaylistDownloadEntry {
     index: number;
     title: string;
     artist: string;
+    album?: string;
     duration: number;
     thumbnail?: string | null;
     url: string;
 }
+
+export type ExtractionSourceLayer =
+    | 'yt-dlp'
+    | 'spotify-native'
+    | 'http-x'
+    | 'http-tiktok'
+    | 'webview-sniffer'
+    | 'embed'
+    | 'webview';
 
 export interface ExtractedMediaInfo {
     ok: boolean;
@@ -70,9 +80,10 @@ export interface ExtractedMediaInfo {
     errorMessage?: string;
     isPlaylist?: boolean;
     isAudioOnly?: boolean;
-    extractionSource?: 'yt-dlp' | 'embed' | 'webview';
+    extractionSource?: ExtractionSourceLayer;
     title?: string;
     uploader?: string;
+    album?: string;
     domain?: string;
     platform?: string;
     thumbnail?: string | null;
@@ -86,15 +97,24 @@ export interface ExtractedMediaInfo {
     videoFormats?: DownloadFormatOption[];
 }
 
+export interface DownloadMediaMetadata {
+    title?: string;
+    artist?: string;
+    album?: string;
+    artworkUrl?: string | null;
+}
+
 export interface DownloadMediaOptions {
     taskId: string;
     url: string;
     formatId: string;
     mediaType: 'audio' | 'video';
     audioQuality?: string;
+    audioFormat?: 'mp3' | 'm4a' | 'opus';
     targetPath: string;
     headers?: Record<string, string>;
     directStreamUrl?: string | null;
+    metadata?: DownloadMediaMetadata;
 }
 
 export interface DownloadMediaResult {
