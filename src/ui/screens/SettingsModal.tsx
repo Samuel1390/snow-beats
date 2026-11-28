@@ -257,6 +257,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({ visible
             return;
         }
 
+        if (Platform.OS === 'web' && reportImages.length > 0) {
+            Alert.alert(
+                t('settings.report.attachmentsTitle'),
+                isEnglish
+                    ? 'Web browsers cannot attach local images automatically via mailto:. Your email draft will open now — attach the screenshots manually or send from the Android app.'
+                    : 'Los navegadores web no permiten adjuntar archivos locales automáticamente mediante mailto:. Se abrirá el borrador de correo para que adjuntes la captura manualmente (en la app de Android se adjunta sola).'
+            );
+        }
+
         const mailUrl = `mailto:snelo1390@gmail.com?subject=${encodeURIComponent(
             subject
         )}&body=${encodeURIComponent(plainBody)}`;

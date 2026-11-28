@@ -342,6 +342,7 @@ class SnowMetadataModule : Module() {
       val formatId = (options["formatId"] as? String) ?: ""
       val mediaType = (options["mediaType"] as? String) ?: "audio"
       val audioQuality = options["audioQuality"] as? String
+      val audioFormat = options["audioFormat"] as? String
       val targetPath = (options["targetPath"] as? String) ?: "Almacenamiento interno/Snow beats/Download"
       val directStreamUrl = options["directStreamUrl"] as? String
       @Suppress("UNCHECKED_CAST")
@@ -355,6 +356,13 @@ class SnowMetadataModule : Module() {
         }
         ?.toMap()
 
+      @Suppress("UNCHECKED_CAST")
+      val rawMeta = options["metadata"] as? Map<*, *>
+      val metaTitle = (rawMeta?.get("title") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+      val metaArtist = (rawMeta?.get("artist") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+      val metaAlbum = (rawMeta?.get("album") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+      val metaArtworkUrl = (rawMeta?.get("artworkUrl") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+
       var lastEmitMs = 0L
       SnowDownloaderEngine.downloadMedia(
         context = ctx,
@@ -363,9 +371,14 @@ class SnowMetadataModule : Module() {
         formatId = formatId,
         mediaType = mediaType,
         audioQuality = audioQuality,
+        audioFormat = audioFormat,
         targetDisplayPath = targetPath,
         headers = parsedHeaders,
-        directStreamUrl = directStreamUrl
+        directStreamUrl = directStreamUrl,
+        metadataTitle = metaTitle,
+        metadataArtist = metaArtist,
+        metadataAlbum = metaAlbum,
+        metadataArtworkUrl = metaArtworkUrl
       ) { progress, etaInSeconds, line ->
         val now = System.currentTimeMillis()
         if (now - lastEmitMs >= 220L || progress >= 99.5f) {
@@ -468,38 +481,107 @@ class SnowMetadataModule : Module() {
     return try {
       val authority = "${ctx.packageName}.snowbeats.fileprovider"
       val cacheDir = File(ctx.cacheDir, "report_attachments").apply { mkdirs() }
-      val contentUris = ArrayList<Uri>()
+      // Limpia adjuntos antiguos de caché (> 24h)
+      try {
+        val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+        cacheDir.listFiles()?.forEach { old -> if (old.lastModified() < cutoff) old.delete() }
+      } catch (_: Exception) { }
 
+      val contentUris = ArrayList<Uri>()
       imageUris.take(5).forEachIndexed { idx, rawUri ->
         try {
-          val parsed = Uri.parse(rawUri)
-          val dest = File(cacheDir, "snow_report_${System.currentTimeMillis()}_$idx.jpg")
-          ctx.contentResolver.openInputStream(parsed)?.use { input ->
-            FileOutputStream(dest).use { output -> input.copyTo(output) }
+          val trimmed = rawUri.trim()
+          if (trimmed.isEmpty()) return@forEachIndexed
+          val lower = trimmed.lowercase()
+          val ext = when {
+            lower.contains(".png") || lower.startsWith("data:image/png") -> "png"
+            lower.contains(".webp") || lower.startsWith("data:image/webp") -> "webp"
+            else -> "jpg"
           }
+          val dest = File(cacheDir, "snow_report_${System.currentTimeMillis()}_$idx.$ext")
+
+          when {
+            trimmed.startsWith("data:image/", ignoreCase = true) -> {
+              val commaIdx = trimmed.indexOf(',')
+              if (commaIdx > 0) {
+                val bytes = Base64.decode(trimmed.substring(commaIdx + 1), Base64.DEFAULT)
+                FileOutputStream(dest).use { it.write(bytes) }
+              }
+            }
+            trimmed.startsWith("file://", ignoreCase = true) -> {
+              val parsed = Uri.parse(trimmed)
+              val localFile = parsed.path?.let { File(it) }
+              if (localFile != null && localFile.exists() && localFile.canRead()) {
+                localFile.inputStream().use { input ->
+                  FileOutputStream(dest).use { output -> input.copyTo(output) }
+                }
+              } else {
+                ctx.contentResolver.openInputStream(parsed)?.use { input ->
+                  FileOutputStream(dest).use { output -> input.copyTo(output) }
+                }
+              }
+            }
+            trimmed.startsWith("/") -> {
+              val localFile = File(trimmed)
+              if (localFile.exists() && localFile.canRead()) {
+                localFile.inputStream().use { input ->
+                  FileOutputStream(dest).use { output -> input.copyTo(output) }
+                }
+              }
+            }
+            else -> {
+              val parsed = Uri.parse(trimmed)
+              ctx.contentResolver.openInputStream(parsed)?.use { input ->
+                FileOutputStream(dest).use { output -> input.copyTo(output) }
+              }
+            }
+          }
+
           if (dest.exists() && dest.length() > 0) {
             contentUris.add(FileProvider.getUriForFile(ctx, authority, dest))
           }
         } catch (_: Exception) { }
       }
 
-      // Selector mailto: restringe la resolución estrictamente a clientes de correo (excluye WhatsApp, Telegram, etc.)
-      val emailSelector = Intent(Intent.ACTION_SENDTO).apply {
-        data = Uri.parse("mailto:")
+      // Resuelve exclusivamente paquetes de clientes de correo instalados vía mailto:
+      val mailtoProbe = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+      val resolvedEmailPkgs = LinkedHashSet<String>()
+      try {
+        val mailApps = ctx.packageManager.queryIntentActivities(mailtoProbe, PackageManager.MATCH_DEFAULT_ONLY)
+        for (ri in mailApps) {
+          val pkg = ri.activityInfo?.packageName
+          if (!pkg.isNullOrBlank()) resolvedEmailPkgs.add(pkg)
+        }
+        val allMailApps = ctx.packageManager.queryIntentActivities(mailtoProbe, 0)
+        for (ri in allMailApps) {
+          val pkg = ri.activityInfo?.packageName
+          if (!pkg.isNullOrBlank()) resolvedEmailPkgs.add(pkg)
+        }
+      } catch (_: Exception) { }
+
+      // Fallback explícito si el OEM ocultó mailto: — comprueba clientes de email conocidos
+      if (resolvedEmailPkgs.isEmpty()) {
+        val knownEmailApps = listOf(
+          "com.google.android.gm",
+          "com.microsoft.office.outlook",
+          "com.samsung.android.email.provider",
+          "com.yahoo.mobile.client.android.mail",
+          "ch.protonmail.android",
+          "me.bluemail.mail",
+          "com.fsck.k9"
+        )
+        for (pkg in knownEmailApps) {
+          try {
+            ctx.packageManager.getPackageInfo(pkg, 0)
+            resolvedEmailPkgs.add(pkg)
+          } catch (_: Exception) { }
+        }
       }
 
-      // Otorga permiso explícito de lectura FileProvider a todos los clientes de correo instalados
-      if (contentUris.isNotEmpty()) {
-        try {
-          val emailApps = ctx.packageManager.queryIntentActivities(emailSelector, 0)
-          for (resolveInfo in emailApps) {
-            val pkg = resolveInfo.activityInfo?.packageName ?: continue
-            for (uri in contentUris) {
-              ctx.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-          }
-        } catch (_: Exception) { }
-      }
+      // Prioriza Gmail si está instalado para abrir directamente con los adjuntos intactos
+      val orderedEmailPkgs = resolvedEmailPkgs.sortedWith(
+        compareByDescending<String> { it == "com.google.android.gm" }
+      )
 
       val richSpanned: CharSequence = if (htmlBody.isNotBlank()) {
         HtmlCompat.fromHtml(htmlBody, HtmlCompat.FROM_HTML_MODE_LEGACY)
@@ -507,59 +589,89 @@ class SnowMetadataModule : Module() {
         plainBody
       }
 
-      val emailIntent = when {
-        contentUris.isEmpty() -> {
-          Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:")
-            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-            putExtra(Intent.EXTRA_SUBJECT, subject)
-            putExtra(Intent.EXTRA_TEXT, richSpanned)
-            if (htmlBody.isNotBlank()) {
-              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
-            }
+      // Sin adjuntos: ACTION_SENDTO mailto: directo (solo apps de correo)
+      if (contentUris.isEmpty()) {
+        val sendToIntent = Intent(Intent.ACTION_SENDTO).apply {
+          data = Uri.parse("mailto:")
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, richSpanned)
+          if (htmlBody.isNotBlank()) {
+            putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
           }
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        contentUris.size == 1 -> {
-          Intent(Intent.ACTION_SEND).apply {
-            selector = emailSelector
-            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-            putExtra(Intent.EXTRA_SUBJECT, subject)
-            putExtra(Intent.EXTRA_TEXT, richSpanned)
-            if (htmlBody.isNotBlank()) {
-              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
-            }
+        ctx.startActivity(sendToIntent)
+        return true
+      }
+
+      // Otorga permiso explícito de lectura FileProvider a cada cliente de correo encontrado
+      for (pkg in orderedEmailPkgs) {
+        for (uri in contentUris) {
+          try {
+            ctx.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          } catch (_: Exception) { }
+        }
+      }
+
+      fun buildTargetedEmailIntent(targetPkg: String?): Intent {
+        val action = if (contentUris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE
+        return Intent(action).apply {
+          type = "image/*"
+          if (!targetPkg.isNullOrBlank()) {
+            setPackage(targetPkg)
+          }
+          putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+          putExtra(Intent.EXTRA_TEXT, richSpanned)
+          if (htmlBody.isNotBlank()) {
+            putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
+          }
+          if (contentUris.size == 1) {
             putExtra(Intent.EXTRA_STREAM, contentUris[0])
             clipData = ClipData.newUri(ctx.contentResolver, "Snow Beats Report", contentUris[0])
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-          }
-        }
-        else -> {
-          Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            selector = emailSelector
-            putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
-            putExtra(Intent.EXTRA_SUBJECT, subject)
-            putExtra(Intent.EXTRA_TEXT, richSpanned)
-            if (htmlBody.isNotBlank()) {
-              putExtra(Intent.EXTRA_HTML_TEXT, htmlBody)
-            }
+          } else {
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, contentUris)
             val clip = ClipData.newUri(ctx.contentResolver, "Snow Beats Report", contentUris[0])
             for (i in 1 until contentUris.size) {
               clip.addItem(ClipData.Item(contentUris[i]))
             }
             clipData = clip
+          }
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      }
+
+      // Filtra solo los paquetes de correo que realmente aceptan ACTION_SEND / ACTION_SEND_MULTIPLE con image/*
+      val validTargetedIntents = orderedEmailPkgs.mapNotNull { pkg ->
+        val candidate = buildTargetedEmailIntent(pkg)
+        if (candidate.resolveActivity(ctx.packageManager) != null) candidate else null
+      }
+
+      val launchedIntent = when {
+        validTargetedIntents.size == 1 -> validTargetedIntents[0]
+        validTargetedIntents.size > 1 -> {
+          val primary = validTargetedIntents[0]
+          val extras = validTargetedIntents.drop(1).toTypedArray()
+          Intent.createChooser(primary, subject).apply {
+            putExtra(Intent.EXTRA_INITIAL_INTENTS, extras)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+        }
+        else -> {
+          // Último recurso con tipo message/rfc822 conservando EXTRA_STREAM y clipData
+          buildTargetedEmailIntent(null).apply {
+            type = "message/rfc822"
           }
         }
       }
 
-      emailIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
       try {
-        ctx.startActivity(emailIntent)
+        ctx.startActivity(launchedIntent)
         true
       } catch (_: Exception) {
-        // Respaldo: si el dispositivo no admite selector con adjuntos, abre directamente mailto: solo para email
         val fallbackMailto = Intent(Intent.ACTION_SENDTO).apply {
           data = Uri.parse("mailto:${Uri.encode(to)}")
           putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
